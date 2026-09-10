@@ -1,0 +1,4 @@
+interface:
+  display_name: "Emulsion MCP"
+  short_description: "Test and use Emulsion desktop MCP"
+  default_prompt: "Use $emulsion-mcp to test or change the Emulsion desktop MCP integration."

@@ -1,0 +1,38 @@
+# frontend build
+/frontend/node_modules/
+/frontend/dist/
+/frontend/package.json.md5
+/frontend/.vite-dev.*.log
+
+# wails build artifacts
+/build/bin/
+/build/runtime-package/
+/build/generated/
+
+# tooling caches
+/.tmp/
+/.tmp-go-modcache/
+/.tmp-go-cache-ui/
+**/*.go.[0-9]*
+.pnpm-store/
+*.tsbuildinfo
+
+# testdata local artifacts
+/testdata/local-library/manifest.local.json
+/testdata/local-library/samples/
+/testdata/local-library/reports/
+/testdata/**/__pycache__/
+
+# storage plugin runtime assets (fetched and signed at build time)
+/storage_plugins/runtime_assets/*
+!/storage_plugins/runtime_assets/.gitkeep
+
+# misc
+.DS_Store
+*.pem
+*.bak
+*.orig
+*.rej
+node_modules/
+.env
+.env.*

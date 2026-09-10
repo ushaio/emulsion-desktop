@@ -1,0 +1,10 @@
+{
+  "name": "emulsion-desktop",
+  "version": "0.8.3",
+  "private": true,
+  "description": "Emulsion — MO Gallery desktop administration client (Wails + React/Vite).",
+  "scripts": {
+    "dev": "pnpm --filter mo-gallery-desktop-frontend dev",
+    "build": "pnpm --filter mo-gallery-desktop-frontend build"
+  }
+}

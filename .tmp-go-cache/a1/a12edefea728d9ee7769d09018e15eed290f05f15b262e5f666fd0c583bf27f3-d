@@ -1,0 +1,5 @@
+./credential_store.go
+./credential_store_windows.go
+./manager.go
+./mcp.go
+./types.go

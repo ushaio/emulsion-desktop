@@ -1,0 +1,22 @@
+# test log
+stat C:\Users\ADMINI~1\AppData\Local\Temp\TestConnectLocalAICreatesSQLiteSchema61496621\001
+stat C:\Users\ADMINI~1\AppData\Local\Temp\TestConnectLocalAICreatesSQLiteSchema61496621\001\editor-ai.db
+open C:\Users\ADMINI~1\AppData\Local\Temp
+stat C:\Users\ADMINI~1\AppData\Local\Temp\TestLocalAIConversationPersistsAcrossReconnect683913155\001
+stat C:\Users\ADMINI~1\AppData\Local\Temp\TestLocalAIConversationPersistsAcrossReconnect683913155\001
+open C:\Users\ADMINI~1\AppData\Local\Temp
+stat C:\Users\ADMINI~1\AppData\Local\Temp\TestLocalDraftsPersistAcrossReconnect3326098242\001
+stat C:\Users\ADMINI~1\AppData\Local\Temp\TestLocalDraftsPersistAcrossReconnect3326098242\001
+stat C:\Users\ADMINI~1\AppData\Local\Temp\TestLocalDraftsPersistAcrossReconnect3326098242\001\drafts.db
+open C:\Users\ADMINI~1\AppData\Local\Temp
+stat C:\Users\ADMINI~1\AppData\Local\Temp\TestSaveLocalDraftRejectsInvalidJSON1783862351\001
+open C:\Users\ADMINI~1\AppData\Local\Temp
+stat C:\Users\ADMINI~1\AppData\Local\Temp\TestLocalDraftCloudSyncMarkerRoundTrips2122651783\001
+open C:\Users\ADMINI~1\AppData\Local\Temp
+open C:\Users\ADMINI~1\AppData\Local\Temp
+stat C:\Users\ADMINI~1\AppData\Local\Temp\TestLocalZinePersistsProjectsAndAssetsAcrossReconnect257119004\001
+stat C:\Users\ADMINI~1\AppData\Local\Temp\TestLocalZinePersistsProjectsAndAssetsAcrossReconnect257119004\001
+stat C:\Users\ADMINI~1\AppData\Local\Temp\TestLocalZinePersistsProjectsAndAssetsAcrossReconnect257119004\001\zine.db
+open C:\Users\ADMINI~1\AppData\Local\Temp
+stat C:\Users\ADMINI~1\AppData\Local\Temp\TestLocalZineProjectUpsertAndDelete3909243815\001
+open C:\Users\ADMINI~1\AppData\Local\Temp

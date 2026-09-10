@@ -1,0 +1,14 @@
+./adobe.go
+./app.go
+./binary.go
+./ciff.go
+./extended_xmp.go
+./icc.go
+./jfif.go
+./jpeg.go
+./log.go
+./marker.go
+./metadata.go
+./mpf.go
+./photoshop.go
+./scanner.go

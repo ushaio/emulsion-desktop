@@ -1,0 +1,6 @@
+./entry.go
+./gps.go
+./ifd.go
+./names.go
+./type.go
+./values.go
