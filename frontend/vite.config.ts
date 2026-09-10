@@ -44,12 +44,14 @@ export default defineConfig({
   // 排除后以原始 ESM 从 node_modules 直出（生产构建不受影响）
   optimizeDeps: {
     exclude: ['@jsquash/avif'],
-    // @mo-gallery/* 是 TS 源码直出的 git 依赖，真实路径在 node_modules/.pnpm
-    // 内部，Vite dev 不会自动优化这种"包内来源"的依赖链；milkdown 树里有
-    // CJS 传递依赖（unified→extend），raw 直出会被浏览器当原生 ESM 加载而
-    // 报 "does not provide an export named 'default'"，必须整体预打包。
-    // 其余 @mo-gallery/* 均为纯 ESM，raw 直出即可。
-    include: ['@mo-gallery/milkdown'],
+    // Vite 只把 .ts/.js 入口的依赖视为可预打包（OPTIMIZABLE_ENTRY_RE 不匹配
+    // .tsx/.jsx），而 @mo-gallery/* 是源码直出的 git 依赖，部分子路径入口就是
+    // .tsx（如 @mo-gallery/milkdown/content → src/MilkdownContent.tsx）。未被
+    // 预打包的 node_modules 模块会连整条依赖链一起 raw 直出，链上的 CJS 包
+    // （remark-directive → unified → extend）被浏览器当原生 ESM 加载时报
+    // "does not provide an export named 'default'"。补齐扩展名后这些入口才会
+    // 走预打包，其 CJS 传递依赖由 esbuild 内联完成 interop。
+    extensions: ['.tsx', '.jsx'],
   },
   build: {
     outDir: 'dist',
