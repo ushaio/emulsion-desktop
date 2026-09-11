@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -771,6 +773,7 @@ func (m *Manager) AssetHandler() http.Handler {
 					w.Header().Set("Content-Type", mimeType)
 				}
 				w.Header().Set("Cache-Control", "no-store")
+				capOpenEndedMediaRange(r, info.Size())
 				http.ServeContent(w, r, filepath.Base(resolved), info.ModTime(), contextReadSeeker{ctx: r.Context(), ReadSeeker: file})
 				return
 			}
@@ -899,6 +902,38 @@ func (reader contextReadSeeker) Read(buffer []byte) (int, error) {
 	default:
 		return reader.ReadSeeker.Read(buffer)
 	}
+}
+
+// mediaOpenRangeCapBytes bounds the body served for an open-ended media Range
+// request ("bytes=N-"). Chromium's media element opens playback with an
+// open-ended range; older stacks abort the response once the demuxer seeks
+// elsewhere, but the WebView2 152 media cache keeps reading it to EOF. For a
+// moov-at-end recording (every camera/drone file) that meant the whole
+// multi-GB file was pulled into the renderer before playback could start —
+// seconds of latency, and a renderer crash on very large files. Returning a
+// legal short 206 forces every client onto bounded, seekable range reads.
+const mediaOpenRangeCapBytes = int64(4 << 20)
+
+var openEndedMediaRange = regexp.MustCompile(`^bytes=([0-9]+)-$`)
+
+// capOpenEndedMediaRange rewrites "bytes=N-" into "bytes=N-(N+cap-1)" so
+// ServeContent answers with a capped 206. Closed ranges, suffix ranges
+// ("bytes=-500") and absent headers are left untouched.
+func capOpenEndedMediaRange(r *http.Request, totalSize int64) {
+	header := r.Header.Get("Range")
+	match := openEndedMediaRange.FindStringSubmatch(strings.TrimSpace(header))
+	if match == nil {
+		return
+	}
+	start, err := strconv.ParseInt(match[1], 10, 64)
+	if err != nil || start >= totalSize {
+		return
+	}
+	end := start + mediaOpenRangeCapBytes - 1
+	if end >= totalSize {
+		end = totalSize - 1
+	}
+	r.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
 }
 
 // RecheckMissingAssets verifies the original paths and restores the same asset records when files return.
