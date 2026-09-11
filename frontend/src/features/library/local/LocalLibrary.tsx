@@ -11,6 +11,7 @@ import { LocalLibraryOpeningOverlay } from '@/features/library/local/entry/Local
 import { useLocalLibraryStore } from '@/features/library/local/store'
 import { LocalLibraryUpgradeDialog } from '@/features/library/local/entry/LocalLibraryUpgradeDialog'
 import type { EntryState, LibrarySnapshot, LibraryUpgradeInfo, LocalAsset } from '@/features/library/local/types'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 interface LocalLibraryProps {
   selectionMode?: boolean
@@ -34,6 +35,12 @@ export function LocalLibrary({ selectionMode = false, existingAssetIds = [], onS
   const [upgradeRequest, setUpgradeRequest] = useState<LibraryUpgradeInfo | null>(null)
   const [upgradePhase, setUpgradePhase] = useState<'confirm' | 'running' | 'completed' | 'failed'>('confirm')
   const [upgradeError, setUpgradeError] = useState('')
+  // True while the upgrade dialog was raised by a user action (clicking a recent
+  // entry, or picking a folder) rather than by the entry state's restore attempt.
+  // Clicking a library that needs an upgrade fails the open and then refreshes the
+  // recent list; that refresh only knows about the auto-restored library, so
+  // without this flag it would tear the dialog down milliseconds after it opened.
+  const upgradeFromAction = useRef(false)
 
   const scanRunning = snapshot != null && snapshot.scan.state === 'running'
   // The library stays behind a progress overlay until its first scan finishes,
@@ -74,10 +81,11 @@ export function LocalLibrary({ selectionMode = false, existingAssetIds = [], onS
       const state = await localLibraryApi.entryState()
       setEntry(state)
       if (state.upgrade?.required) {
+        upgradeFromAction.current = false
         setUpgradeRequest(state.upgrade)
         setUpgradePhase('confirm')
         setUpgradeError('')
-      } else {
+      } else if (!upgradeFromAction.current) {
         setUpgradeRequest(null)
       }
       if (state.active && state.snapshot) {
@@ -88,6 +96,7 @@ export function LocalLibrary({ selectionMode = false, existingAssetIds = [], onS
     } catch (cause) {
       const upgrade = upgradeFromError(cause)
       if (upgrade?.rootPath) {
+        upgradeFromAction.current = false
         setUpgradeRequest(upgrade)
         setUpgradePhase('confirm')
         setUpgradeError('')
@@ -143,6 +152,7 @@ export function LocalLibrary({ selectionMode = false, existingAssetIds = [], onS
   }, [pendingSnapshot, setSnapshot])
 
   const handleOpened = (next: LibrarySnapshot) => {
+    upgradeFromAction.current = false
     setUpgradeRequest(null)
     resetNavigation()
     if (next.scan.state === 'running') {
@@ -164,6 +174,7 @@ export function LocalLibrary({ selectionMode = false, existingAssetIds = [], onS
   }
 
   const handleUpgradeRequired = (info: LibraryUpgradeInfo) => {
+    upgradeFromAction.current = true
     setUpgradeRequest(info)
     setUpgradePhase('confirm')
     setUpgradeError('')
@@ -235,7 +246,7 @@ export function LocalLibrary({ selectionMode = false, existingAssetIds = [], onS
 
   const initializeDialog = initializePath ? (
     <div className="fixed inset-0 z-[170] flex items-center justify-center bg-black/45 p-4">
-      <div role="dialog" aria-modal="true" aria-labelledby="initialize-library-title" className="relative w-full max-w-md rounded-xl border bg-background p-5 shadow-2xl" style={{ borderColor: 'var(--border)' }}>
+      <div role="dialog" aria-modal="true" aria-labelledby="initialize-library-title" className="lg-sheet relative w-full max-w-md rounded-xl border bg-background p-5 shadow-2xl" style={{ borderColor: 'var(--border)' }}><GlassBackdrop material="regular" />
         <h2 id="initialize-library-title" className="text-base font-semibold">{copy.initializeConfirmTitle}</h2>
         <p className="mt-2 text-sm leading-6" style={{ color: 'var(--muted-foreground)' }}>{copy.initializeConfirmBody}</p>
         <p className="mt-3 truncate text-xs" style={{ color: 'var(--muted-foreground)' }} title={initializePath}>{initializePath}</p>

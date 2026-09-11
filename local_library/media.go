@@ -48,6 +48,41 @@ var supportedExtensions = map[string]struct{}{
 	".nef": {}, ".arw": {}, ".dng": {}, ".raf": {}, ".rw2": {},
 }
 
+// videoExtensions and audioExtensions are the time-based media the library can
+// play and clip. They are deliberately separate from supportedExtensions: Go
+// never decodes them (playback is the frontend's job), and their grid
+// thumbnails come from a frontend-captured poster frame instead of
+// renderJPEGDerivative.
+var videoExtensions = map[string]struct{}{".mp4": {}, ".mov": {}}
+var audioExtensions = map[string]struct{}{
+	".mp3": {}, ".m4a": {}, ".aac": {}, ".wav": {}, ".flac": {}, ".ogg": {},
+}
+
+func isVideoExtension(ext string) bool {
+	_, ok := videoExtensions[strings.ToLower(ext)]
+	return ok
+}
+
+func isAudioExtension(ext string) bool {
+	_, ok := audioExtensions[strings.ToLower(ext)]
+	return ok
+}
+
+// timedMediaKind reports the media_kind for playable video/audio extensions.
+func timedMediaKind(ext string) (string, bool) {
+	switch {
+	case isVideoExtension(ext):
+		return "video", true
+	case isAudioExtension(ext):
+		return "audio", true
+	}
+	return "", false
+}
+
+func isTimedMediaKind(kind string) bool {
+	return kind == "video" || kind == "audio"
+}
+
 // ignoredFileNames are common OS-level junk files that are never indexed.
 var ignoredFileNames = map[string]struct{}{
 	"thumbs.db": {}, "ehthumbs.db": {}, "ehthumbs_vista.db": {},
@@ -122,6 +157,22 @@ func formatForExtension(ext string) (string, string) {
 		return "raf", "image/x-fuji-raf"
 	case ".rw2":
 		return "rw2", "image/x-panasonic-rw2"
+	case ".mp4":
+		return "mp4", "video/mp4"
+	case ".mov":
+		return "mov", "video/quicktime"
+	case ".mp3":
+		return "mp3", "audio/mpeg"
+	case ".m4a":
+		return "m4a", "audio/mp4"
+	case ".aac":
+		return "aac", "audio/aac"
+	case ".wav":
+		return "wav", "audio/wav"
+	case ".flac":
+		return "flac", "audio/flac"
+	case ".ogg":
+		return "ogg", "audio/ogg"
 	default:
 		if detected := mime.TypeByExtension(ext); detected != "" {
 			return strings.TrimPrefix(ext, "."), detected
@@ -160,6 +211,22 @@ func formatAndMIME(format string) (string, string) {
 		return "raf", "image/x-fuji-raf"
 	case "rw2":
 		return "rw2", "image/x-panasonic-rw2"
+	case "mp4":
+		return "mp4", "video/mp4"
+	case "mov":
+		return "mov", "video/quicktime"
+	case "mp3":
+		return "mp3", "audio/mpeg"
+	case "m4a":
+		return "m4a", "audio/mp4"
+	case "aac":
+		return "aac", "audio/aac"
+	case "wav":
+		return "wav", "audio/wav"
+	case "flac":
+		return "flac", "audio/flac"
+	case "ogg":
+		return "ogg", "audio/ogg"
 	default:
 		return format, "application/octet-stream"
 	}
@@ -171,6 +238,21 @@ func inspectMedia(path string, info os.FileInfo) (result indexedFile) {
 	result = indexedFile{FileName: filepath.Base(path), Extension: ext, Format: candidateFormat, MimeType: candidateMIME,
 		ByteSize: info.Size(), ModifiedAtNS: info.ModTime().UnixNano(), Orientation: 1, FrameCount: 1,
 		PreviewStatus: "unavailable", MetadataStatus: "partial"}
+	if kind, ok := timedMediaKind(ext); ok {
+		// Playable media is never decoded here: playback happens in the
+		// frontend and the grid thumbnail comes from a frontend-captured
+		// poster frame. Duration for mp4/mov comes from the moov box; audio
+		// durations are reported by the frontend after loadedmetadata.
+		result.MediaKind = kind
+		result.PreviewStatus = "pending"
+		result.MetadataStatus = "partial"
+		if kind == "video" {
+			if durationMS, durationErr := parseMP4Duration(path); durationErr == nil && durationMS > 0 {
+				result.DurationMS = durationMS
+			}
+		}
+		return result
+	}
 	if !isSupportedMedia(path) {
 		// Non-photo files are indexed for browsing but never decoded: they
 		// stay with a file-format placeholder preview.

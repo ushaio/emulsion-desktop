@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const currentSchemaVersion = 14
+const currentSchemaVersion = 15
 
 // sqliteBatchParameters caps how many bound parameters a generated statement
 // uses. SQLITE_MAX_VARIABLE_NUMBER defaults to 32766 in modern SQLite; staying
@@ -51,6 +51,7 @@ type indexedFile struct {
 	MediaKind      string
 	ByteSize       int64
 	ModifiedAtNS   int64
+	DurationMS     int64
 	Width          int
 	Height         int
 	Orientation    int
@@ -329,6 +330,17 @@ func (s *store) migrate() error {
 			    video_mime TEXT NOT NULL DEFAULT '',
 			    video_length INTEGER NOT NULL DEFAULT 0
 		        )`,
+		// asset_clips stores logical media segments (mark-in / mark-out points)
+		// of playable assets. A clip is a database record only — exporting it to
+		// a real file is an explicit user action.
+		`CREATE TABLE IF NOT EXISTS asset_clips (
+			    id TEXT PRIMARY KEY,
+			    asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+			    title TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
+			    start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,
+			    color_label TEXT NOT NULL DEFAULT '', rating INTEGER NOT NULL DEFAULT 0 CHECK(rating BETWEEN 0 AND 5),
+			    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+		        )`,
 		`CREATE TABLE IF NOT EXISTS exif (
             asset_id TEXT PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE,
             camera_make TEXT NOT NULL DEFAULT '', camera_model TEXT NOT NULL DEFAULT '', lens_model TEXT NOT NULL DEFAULT '',
@@ -360,6 +372,7 @@ func (s *store) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_assets_favorite ON assets(availability, is_favorite, discovered_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_assets_rating ON assets(availability, rating DESC, id DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_asset_live_photos_live ON asset_live_photos(is_live_photo, asset_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_asset_clips_asset ON asset_clips(asset_id, start_ms)`,
 		`CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(parent_id, name COLLATE NOCASE)`,
 		`CREATE INDEX IF NOT EXISTS idx_asset_tags_tag_asset ON asset_tags(tag_id, asset_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_collection_assets_asset_collection ON collection_assets(asset_id, collection_id)`,
@@ -420,6 +433,20 @@ func (s *store) migrate() error {
 	}
 	if err := addColumnIfMissing(tx, "assets", "local_id", "INTEGER"); err != nil {
 		return fmt.Errorf("M012 add assets.local_id: %w", err)
+	}
+	// M015: playable media gets its own media_kind plus a duration column.
+	// Existing libraries indexed mp4/mov/audio files as generic 'file' rows;
+	// reclassify them so they become playable without a re-scan.
+	if err := addColumnIfMissing(tx, "assets", "duration_ms", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("M015 add assets.duration_ms: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE assets SET media_kind='video', preview_status='pending', preview_error='', metadata_status='partial'
+		WHERE media_kind='file' AND lower(extension) IN ('.mp4','.mov')`); err != nil {
+		return fmt.Errorf("M015 reclassify video assets: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE assets SET media_kind='audio', preview_status='pending', preview_error='', metadata_status='partial'
+		WHERE media_kind='file' AND lower(extension) IN ('.mp3','.m4a','.aac','.wav','.flac','.ogg')`); err != nil {
+		return fmt.Errorf("M015 reclassify audio assets: %w", err)
 	}
 	// Keep the existing UUID as the stable public identity while assigning a
 	// compact SQLite integer identity for local indexing and future joins.
@@ -561,11 +588,11 @@ func (s *store) upsertAsset(ctx context.Context, file indexedFile, scanToken str
 		existingID = newID()
 		created = true
 		_, err = tx.ExecContext(ctx, `INSERT INTO assets(
-		            id,folder_id,relative_path,path_key,file_name,extension,format,mime_type,media_kind,byte_size,modified_at_ns,width,height,orientation,is_animated,frame_count,
+		            id,folder_id,relative_path,path_key,file_name,extension,format,mime_type,media_kind,byte_size,modified_at_ns,duration_ms,width,height,orientation,is_animated,frame_count,
 		            availability,preview_status,preview_error,metadata_status,dominant_colors,captured_at,discovered_at,technical_updated_at,scan_token
-					) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active',?,?,?,?,?,?,?,?)`,
+					) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active',?,?,?,?,?,?,?,?)`,
 			existingID, folderID, file.RelativePath, file.PathKey, file.FileName, file.Extension, file.Format, file.MimeType, mediaKindOrDefault(file.MediaKind),
-			file.ByteSize, file.ModifiedAtNS, file.Width, file.Height, normalizedOrientation(file.Orientation), file.IsAnimated, file.FrameCount,
+			file.ByteSize, file.ModifiedAtNS, file.DurationMS, file.Width, file.Height, normalizedOrientation(file.Orientation), file.IsAnimated, file.FrameCount,
 			file.PreviewStatus, boundedError(file.PreviewError), file.MetadataStatus, encodeDominantColors(file.DominantColors), capturedAt, now, now, scanToken)
 	case nil:
 		previewStatus, previewError := file.PreviewStatus, boundedError(file.PreviewError)
@@ -574,8 +601,8 @@ func (s *store) upsertAsset(ctx context.Context, file indexedFile, scanToken str
 			previewStatus, previewError = oldPreviewStatus, oldPreviewError
 			dominantColors = oldDominantColors
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE assets SET folder_id=?,relative_path=?,file_name=?,extension=?,format=?,mime_type=?,media_kind=?,byte_size=?,modified_at_ns=?,width=?,height=?,orientation=?,is_animated=?,frame_count=?,availability='active',preview_status=?,preview_error=?,metadata_status=?,dominant_colors=?,captured_at=?,technical_updated_at=?,scan_token=?,trash_entry_id=NULL WHERE id=?`,
-			folderID, file.RelativePath, file.FileName, file.Extension, file.Format, file.MimeType, mediaKindOrDefault(file.MediaKind), file.ByteSize, file.ModifiedAtNS,
+		_, err = tx.ExecContext(ctx, `UPDATE assets SET folder_id=?,relative_path=?,file_name=?,extension=?,format=?,mime_type=?,media_kind=?,byte_size=?,modified_at_ns=?,duration_ms=?,width=?,height=?,orientation=?,is_animated=?,frame_count=?,availability='active',preview_status=?,preview_error=?,metadata_status=?,dominant_colors=?,captured_at=?,technical_updated_at=?,scan_token=?,trash_entry_id=NULL WHERE id=?`,
+			folderID, file.RelativePath, file.FileName, file.Extension, file.Format, file.MimeType, mediaKindOrDefault(file.MediaKind), file.ByteSize, file.ModifiedAtNS, file.DurationMS,
 			file.Width, file.Height, normalizedOrientation(file.Orientation), file.IsAnimated, file.FrameCount, previewStatus, previewError,
 			file.MetadataStatus, dominantColors, capturedAt, now, scanToken, existingID)
 	default:
@@ -858,11 +885,19 @@ func buildAssetWhere(query AssetQuery, availability string) ([]string, []any, er
 	default:
 		return nil, nil, newError(ErrInvalidPath, "不支持的上传状态筛选值", map[string]any{"uploadStatus": query.UploadStatus})
 	}
-	if query.PhotosOnly {
+	// VideoOnly takes precedence over PhotosOnly: the playable-media view is a
+	// mutually exclusive media-kind switch, and the photos-only default from
+	// the asset grid must not empty out the video view.
+	if query.VideoOnly {
+		where = append(where, "(a.media_kind='video' OR a.media_kind='audio')")
+	} else if query.PhotosOnly {
 		where = append(where, "(a.media_kind='image' OR a.media_kind='live-photo')")
 	}
 	if query.LivePhotoOnly {
 		where = append(where, "EXISTS (SELECT 1 FROM asset_live_photos lp WHERE lp.asset_id=a.id AND lp.is_live_photo=1)")
+	}
+	if query.WithClipsOnly {
+		where = append(where, "EXISTS (SELECT 1 FROM asset_clips ac WHERE ac.asset_id=a.id)")
 	}
 	if ids := uniqueIDs(query.TagIDs); len(ids) > 0 {
 		where = append(where, "EXISTS (SELECT 1 FROM asset_tags qat WHERE qat.asset_id=a.id AND qat.tag_id IN ("+queryPlaceholders(len(ids))+"))")
@@ -1048,8 +1083,8 @@ func (s *store) listAssets(ctx context.Context, query AssetQuery, sessionID stri
 		return AssetPage{}, err
 	}
 	args = append(args, limit+1)
-	sqlQuery := `SELECT a.id,a.relative_path,a.file_name,a.extension,a.format,a.mime_type,a.media_kind,a.byte_size,a.modified_at_ns,a.width,a.height,a.orientation,a.is_animated,a.frame_count,COALESCE(lp.is_live_photo,0),COALESCE(lp.video_mime,''),COALESCE(lp.video_length,0),a.availability,COALESCE(t.id,''),COALESCE(t.entry_kind,''),a.preview_status,a.preview_error,a.metadata_status,a.display_title,a.notes,a.rating,a.color_label,a.is_favorite,a.captured_at,a.discovered_at,a.dominant_colors,a.cloud_photo_id,a.cloud_path,a.cloud_thumb_path,a.cloud_storage_source_id,a.cloud_storage_plugin_id,a.cloud_url_type,a.cloud_remote_updated_at,a.cloud_sync_state,a.cloud_sync_error,
-	        e.camera_make,e.camera_model,e.lens_model,e.iso,e.aperture,e.shutter_seconds,e.focal_length_mm,e.latitude,e.longitude,` + sortExpr + `
+	sqlQuery := `SELECT a.id,a.relative_path,a.file_name,a.extension,a.format,a.mime_type,a.media_kind,a.byte_size,a.modified_at_ns,a.duration_ms,a.width,a.height,a.orientation,a.is_animated,a.frame_count,COALESCE(lp.is_live_photo,0),COALESCE(lp.video_mime,''),COALESCE(lp.video_length,0),a.availability,COALESCE(t.id,''),COALESCE(t.entry_kind,''),a.preview_status,a.preview_error,a.metadata_status,a.display_title,a.notes,a.rating,a.color_label,a.is_favorite,a.captured_at,a.discovered_at,a.dominant_colors,a.cloud_photo_id,a.cloud_path,a.cloud_thumb_path,a.cloud_storage_source_id,a.cloud_storage_plugin_id,a.cloud_url_type,a.cloud_remote_updated_at,a.cloud_sync_state,a.cloud_sync_error,
+	e.camera_make,e.camera_model,e.lens_model,e.iso,e.aperture,e.shutter_seconds,e.focal_length_mm,e.latitude,e.longitude,(SELECT COUNT(*) FROM asset_clips ac WHERE ac.asset_id=a.id),` + sortExpr + `
 	        FROM assets a LEFT JOIN folders f ON f.id=a.folder_id LEFT JOIN asset_live_photos lp ON lp.asset_id=a.id LEFT JOIN exif e ON e.asset_id=a.id LEFT JOIN trash_entries t ON t.id=a.trash_entry_id
         WHERE ` + baseWhere + ` ORDER BY ` + sortExpr + ` ` + direction + `,a.id ` + direction + ` LIMIT ?`
 	rows, err := s.db.QueryContext(ctx, sqlQuery, args...)
@@ -1078,7 +1113,7 @@ func (s *store) listAssets(ctx context.Context, query AssetQuery, sessionID stri
 		var dominantColors string
 		var cloudPhotoID, cloudPath, cloudThumbPath, cloudSourceID, cloudPluginID, cloudURLType, cloudSyncState, cloudSyncError sql.NullString
 		var cloudRemoteUpdatedAt sql.NullInt64
-		if err := rows.Scan(&item.ID, &item.RelativePath, &item.FileName, &item.Extension, &item.Format, &item.MimeType, &item.MediaKind, &item.ByteSize, &item.ModifiedAtNS, &item.Width, &item.Height, &item.Orientation, &animated, &item.FrameCount, &livePhoto, &livePhotoVideoMIME, &livePhotoVideoLength, &item.Availability, &item.TrashEntryID, &item.TrashEntryKind, &item.PreviewStatus, &item.PreviewError, &item.MetadataStatus, &item.DisplayTitle, &item.Notes, &item.Rating, &item.ColorLabel, &favorite, &captured, &discovered, &dominantColors, &cloudPhotoID, &cloudPath, &cloudThumbPath, &cloudSourceID, &cloudPluginID, &cloudURLType, &cloudRemoteUpdatedAt, &cloudSyncState, &cloudSyncError, &cameraMake, &cameraModel, &lensModel, &iso, &aperture, &shutterSeconds, &focalLengthMM, &latitude, &longitude, &sortValue); err != nil {
+		if err := rows.Scan(&item.ID, &item.RelativePath, &item.FileName, &item.Extension, &item.Format, &item.MimeType, &item.MediaKind, &item.ByteSize, &item.ModifiedAtNS, &item.DurationMS, &item.Width, &item.Height, &item.Orientation, &animated, &item.FrameCount, &livePhoto, &livePhotoVideoMIME, &livePhotoVideoLength, &item.Availability, &item.TrashEntryID, &item.TrashEntryKind, &item.PreviewStatus, &item.PreviewError, &item.MetadataStatus, &item.DisplayTitle, &item.Notes, &item.Rating, &item.ColorLabel, &favorite, &captured, &discovered, &dominantColors, &cloudPhotoID, &cloudPath, &cloudThumbPath, &cloudSourceID, &cloudPluginID, &cloudURLType, &cloudRemoteUpdatedAt, &cloudSyncState, &cloudSyncError, &cameraMake, &cameraModel, &lensModel, &iso, &aperture, &shutterSeconds, &focalLengthMM, &latitude, &longitude, &item.ClipCount, &sortValue); err != nil {
 			return AssetPage{}, err
 		}
 		item.IsAnimated = animated != 0
@@ -1312,6 +1347,15 @@ func (s *store) assetPath(ctx context.Context, id AssetID) (relative, mime, stat
 	return
 }
 
+func (s *store) assetMediaKind(ctx context.Context, id AssetID) (string, error) {
+	var mediaKind string
+	err := s.db.QueryRowContext(ctx, `SELECT media_kind FROM assets WHERE id=?`, id).Scan(&mediaKind)
+	if err == sql.ErrNoRows {
+		err = newError(ErrAssetNotFound, "资产不存在", map[string]any{"assetId": id})
+	}
+	return mediaKind, err
+}
+
 func (s *store) livePhotoMime(ctx context.Context, id AssetID) (string, error) {
 	var mime string
 	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(lp.video_mime,'') FROM assets a LEFT JOIN asset_live_photos lp ON lp.asset_id=a.id WHERE a.id=?`, id).Scan(&mime)
@@ -1374,8 +1418,8 @@ type derivativeRecord struct {
 }
 
 func (s *store) derivativeSource(ctx context.Context, id AssetID) (source derivativeSource, err error) {
-	err = s.db.QueryRowContext(ctx, `SELECT relative_path,mime_type,availability,modified_at_ns,byte_size,orientation,format,extension FROM assets WHERE id=?`, id).
-		Scan(&source.RelativePath, &source.MimeType, &source.Availability, &source.ModifiedAtNS, &source.ByteSize, &source.Orientation, &source.Format, &source.Extension)
+	err = s.db.QueryRowContext(ctx, `SELECT relative_path,mime_type,availability,modified_at_ns,byte_size,orientation,format,extension,media_kind FROM assets WHERE id=?`, id).
+		Scan(&source.RelativePath, &source.MimeType, &source.Availability, &source.ModifiedAtNS, &source.ByteSize, &source.Orientation, &source.Format, &source.Extension, &source.MediaKind)
 	if err == sql.ErrNoRows {
 		err = newError(ErrAssetNotFound, "asset does not exist", map[string]any{"assetId": id})
 	}

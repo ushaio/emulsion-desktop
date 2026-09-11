@@ -601,26 +601,29 @@ func (m *Manager) RestoreAsset(id AssetID) error {
 	return nil
 }
 
-func (m *Manager) resolveAssetRequest(ctx context.Context, sessionID string, id AssetID, kind, requestedCacheKey string) (string, string, error) {
+// resolveAssetRequest maps a served asset request to its on-disk path. For
+// original requests of playable media the media kind is returned so the HTTP
+// handler can stream the file instead of decoding it as an image.
+func (m *Manager) resolveAssetRequest(ctx context.Context, sessionID string, id AssetID, kind, requestedCacheKey string) (string, string, string, error) {
 	if !isOpaqueID(string(id)) {
-		return "", "", newError(ErrAssetNotFound, "\u8d44\u4ea7\u6807\u8bc6\u65e0\u6548", nil)
+		return "", "", "", newError(ErrAssetNotFound, "\u8d44\u4ea7\u6807\u8bc6\u65e0\u6548", nil)
 	}
 	session, err := m.requireAvailableSession()
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if session.ctx.Err() != nil || sessionClosed(session.done) {
-		return "", "", newError(ErrAssetNotFound, "library session is closed", nil)
+		return "", "", "", newError(ErrAssetNotFound, "library session is closed", nil)
 	}
 	if session.sessionID != sessionID {
-		return "", "", newError(ErrAssetNotFound, "资源库会话已失效", nil)
+		return "", "", "", newError(ErrAssetNotFound, "资源库会话已失效", nil)
 	}
 	relative, mimeType, status, err := session.store.assetPath(ctx, id)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if status != "active" {
-		return "", "", newError(ErrAssetNotFound, "资产当前不可用", nil)
+		return "", "", "", newError(ErrAssetNotFound, "资产当前不可用", nil)
 	}
 	if kind == "thumbnail" || kind == "preview" {
 		variant, priority := derivativeThumbnail, derivativePriorityVisible
@@ -629,24 +632,31 @@ func (m *Manager) resolveAssetRequest(ctx context.Context, sessionID string, id 
 		}
 		source, sourceErr := session.store.derivativeSource(ctx, id)
 		if sourceErr != nil {
-			return "", "", sourceErr
+			return "", "", "", sourceErr
 		}
 		expectedCacheKey := derivativeCacheKey(id, source.ModifiedAtNS, source.ByteSize, variant)
 		if requestedCacheKey == "" || requestedCacheKey != expectedCacheKey {
-			return "", "", newError(ErrAssetNotFound, "asset cache key is missing or stale", nil)
+			return "", "", "", newError(ErrAssetNotFound, "asset cache key is missing or stale", nil)
 		}
 		if kind == "preview" && mimeType == "image/gif" {
 			original, resolveErr := resolveWithinRoot(session.root, relative)
-			return original, mimeType, resolveErr
+			return original, mimeType, "", resolveErr
 		}
 		result, requestErr := m.requestDerivative(ctx, session, id, variant, priority, true)
 		if requestErr != nil {
-			return "", "", requestErr
+			return "", "", "", requestErr
 		}
-		return result.path, result.mime, nil
+		return result.path, result.mime, "", nil
 	}
 	original, err := resolveWithinRoot(session.root, relative)
-	return original, mimeType, err
+	if err != nil {
+		return "", "", "", err
+	}
+	mediaKind, kindErr := session.store.assetMediaKind(ctx, id)
+	if kindErr != nil {
+		return "", "", "", kindErr
+	}
+	return original, mimeType, mediaKind, nil
 }
 
 // serveLivePhotoVideo returns the filesystem path to the embedded motion-video
@@ -697,6 +707,22 @@ func (m *Manager) serveLivePhotoVideo(ctx context.Context, session *librarySessi
 
 func (m *Manager) AssetHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			// The only write request is the frontend-captured video poster
+			// frame; everything else is a read.
+			if strings.TrimPrefix(r.URL.Path, "/__local-library/") == "" {
+				http.NotFound(w, r)
+				return
+			}
+			path := strings.TrimPrefix(r.URL.Path, "/__local-library/")
+			parts := strings.Split(path, "/")
+			if len(parts) == 2 && parts[0] == "poster" {
+				m.handleAssetPosterUpload(w, r, AssetID(parts[1]))
+				return
+			}
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -712,7 +738,7 @@ func (m *Manager) AssetHandler() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		resolved, mimeType, err := m.resolveAssetRequest(r.Context(), r.URL.Query().Get("session"), id, kind, r.URL.Query().Get("v"))
+		resolved, mimeType, mediaKind, err := m.resolveAssetRequest(r.Context(), r.URL.Query().Get("session"), id, kind, r.URL.Query().Get("v"))
 		if err != nil {
 			http.Error(w, "asset unavailable", http.StatusNotFound)
 			return
@@ -721,6 +747,31 @@ func (m *Manager) AssetHandler() http.Handler {
 			session, sessionErr := m.currentSession()
 			if sessionErr != nil || session.sessionID != r.URL.Query().Get("session") || session.ctx.Err() != nil {
 				http.Error(w, "asset unavailable", http.StatusNotFound)
+				return
+			}
+			// Playable media is streamed as-is: http.ServeContent answers
+			// Range requests, so the frontend <video> element can seek without
+			// loading the whole file.
+			if isTimedMediaKind(mediaKind) {
+				file, openErr := openVerifiedWithinRoot(session.root, resolved)
+				if openErr != nil {
+					http.Error(w, "asset unavailable", http.StatusNotFound)
+					return
+				}
+				defer file.Close()
+				info, statErr := file.Stat()
+				if statErr != nil || !info.Mode().IsRegular() {
+					http.Error(w, "asset unavailable", http.StatusNotFound)
+					return
+				}
+				if mimeType == "" {
+					mimeType = mime.TypeByExtension(filepath.Ext(resolved))
+				}
+				if mimeType != "" {
+					w.Header().Set("Content-Type", mimeType)
+				}
+				w.Header().Set("Cache-Control", "no-store")
+				http.ServeContent(w, r, filepath.Base(resolved), info.ModTime(), contextReadSeeker{ctx: r.Context(), ReadSeeker: file})
 				return
 			}
 			file, openErr := openVerifiedWithinRoot(session.root, resolved)

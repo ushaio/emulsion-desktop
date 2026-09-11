@@ -3,7 +3,7 @@ import type { DragEvent as ReactDragEvent, ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { CSSProperties } from 'react'
 import {
-  ArchiveRestore, ArrowDown, ArrowUp, ChevronDown, ChevronRight, CircleHelp, Columns3, DatabaseBackup, FileQuestion, Folder, FolderOpen, Heart, Images, LayoutGrid, Loader2, Palette, Star,
+  ArchiveRestore, ArrowDown, ArrowUp, ChevronDown, ChevronRight, CircleHelp, Columns3, DatabaseBackup, FileQuestion, Film, Folder, FolderOpen, Heart, Layers, LayoutGrid, Loader2, Palette, Star,
   Maximize2, Pause, Play, RefreshCw, Settings2, Square, Upload, Wrench, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -53,7 +53,7 @@ import { loadLocalLibraryUploadSettings, normalizeLocalLibraryUploadSettings, sa
 import { RestoreFolderDialog } from '../dialogs/RestoreFolderDialog'
 import { useLocalLibraryStore } from '../store'
 import { isPhotoAsset } from '../types'
-import type { AssetFileOperationPlan, AssetPage, BackupOverview, BatchAssetOrganizationUpdate, FolderDeletionPreview, FolderFileOperationPlan, FolderItem, FolderProperties, FolderTrashEntry, LibrarySnapshot, LocalAsset, LocalLibraryEvent, LocalLibraryImportMode, LocalTag, LocalCollection, CollectionGroup } from '../types'
+import type { AssetFileOperationPlan, AssetPage, BackupOverview, BatchAssetOrganizationUpdate, FolderDeletionPreview, FolderFileOperationPlan, FolderItem, FolderProperties, FolderTrashEntry, LibrarySnapshot, LocalAsset, LocalAssetClip, LocalLibraryEvent, LocalLibraryImportMode, LocalTag, LocalCollection, CollectionGroup } from '../types'
 import type { LocalLibraryCopy } from '../copy'
 
 interface Props {
@@ -98,6 +98,7 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
   const [refreshKey, setRefreshKey] = useState(0)
   const [favoriteCount, setFavoriteCount] = useState(0)
   const [livePhotoCount, setLivePhotoCount] = useState(0)
+  const [videoCount, setVideoCount] = useState(0)
   const [saving, setSaving] = useState(false)
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const pendingSaveCountRef = useRef(0)
@@ -115,6 +116,12 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
   const [assetDropTargetFolder, setAssetDropTargetFolder] = useState<string | null>(null)
   const [draggedFolderPath, setDraggedFolderPath] = useState<string | null>(null)
   const [folderDropTarget, setFolderDropTarget] = useState<string | null>(null)
+  // 「视频」视图：与 Live Photo/收藏同构的网格视图，只显示可播放的音视频。
+  const [videoOnly, setVideoOnly] = useState(false)
+  // 视频视图内的「仅显示带片段」筛选。
+  const [clipsOnly, setClipsOnly] = useState(false)
+  // 从片段入口打开播放器时，限定播放该片段的起止范围。
+  const [previewClip, setPreviewClip] = useState<LocalAssetClip | null>(null)
   // 视图模式与缩放级别与云端共用同一份持久化偏好（usePreferences），保证交互一致。
   // 视图模式是点击切换，直接读写 store；缩放滑杆拖动频率高，
   // 先本地 state 即时响应，停止 200ms 后再写回偏好，避免每次拖动同步写 localStorage 卡顿。
@@ -199,8 +206,8 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
 
   const query = useMemo(() => ({
     // limit 取后端上限 200：续抓循环要跑完整个查询，页越大往返次数越少。
-    folder, directFolderOnly, search: deferredSearch, sort, sortDirection, availability, favoritesOnly, livePhotoOnly, tagIds, collectionIds, ...filters, photosOnly, limit: 200,
-  }), [availability, collectionIds, deferredSearch, directFolderOnly, favoritesOnly, filters, folder, livePhotoOnly, sort, sortDirection, tagIds])
+    folder, directFolderOnly, search: deferredSearch, sort, sortDirection, availability, favoritesOnly, livePhotoOnly, videoOnly, withClipsOnly: videoOnly && clipsOnly, tagIds, collectionIds, ...filters, photosOnly, limit: 200,
+  }), [availability, clipsOnly, collectionIds, deferredSearch, directFolderOnly, favoritesOnly, filters, folder, livePhotoOnly, sort, sortDirection, tagIds, videoOnly])
   const queryKey = useMemo(() => JSON.stringify(query), [query])
   const activeQueryKeyRef = useRef(queryKey)
   const requestedQueryKeyRef = useRef(queryKey)
@@ -250,6 +257,13 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
     try {
       const result = await localLibraryApi.listAssets({ availability: 'active', livePhotoOnly: true, limit: 1 })
       setLivePhotoCount(result.total)
+    } catch { /* the active asset request reports session errors */ }
+  }, [])
+
+  const reloadVideoCount = useCallback(async () => {
+    try {
+      const result = await localLibraryApi.listAssets({ availability: 'active', videoOnly: true, limit: 1 })
+      setVideoCount(result.total)
     } catch { /* the active asset request reports session errors */ }
   }, [])
 
@@ -472,6 +486,7 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
   useCachedPageEffect(() => { void reloadFolders() }, [reloadFolders, refreshKey, snapshot.sessionId])
   useCachedPageEffect(() => { void reloadFavoriteCount() }, [reloadFavoriteCount, refreshKey, snapshot.sessionId])
   useCachedPageEffect(() => { void reloadLivePhotoCount() }, [reloadLivePhotoCount, refreshKey, snapshot.sessionId])
+  useCachedPageEffect(() => { void reloadVideoCount() }, [reloadVideoCount, refreshKey, snapshot.sessionId])
   useCachedPageEffect(() => { void reloadOrganization() }, [reloadOrganization, snapshot.sessionId])
 
   useEffect(() => {
@@ -1625,6 +1640,11 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
     catch (error) { toast.error(parseLocalLibraryError(error).message) }
   }
 
+  const playClipFromDetails = (asset: LocalAsset, clip: LocalAssetClip) => {
+    setPreviewClip(clip)
+    setPreviewAsset(asset)
+  }
+
   const openFolderInFileManager = async (target: FolderTarget) => {
     try { await localLibraryApi.openFolderInFileManager(target.relativePath) }
     catch (error) { toast.error(parseLocalLibraryError(error).message) }
@@ -1697,6 +1717,7 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
     setFolder('')
     setTagIds([])
     setCollectionIds([])
+    setVideoOnly(false)
     setFilters({ ...filters, ...patch })
   }
 
@@ -1718,9 +1739,10 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
         <aside className="col-start-1 row-span-2 row-start-1 flex w-[218px] min-h-0 shrink-0 flex-col overflow-hidden border-r bg-card/82 p-3 shadow-[4px_0_18px_-20px_rgba(15,23,42,0.65)]" style={{ borderColor: 'color-mix(in srgb, var(--border) 78%, transparent)' }}>
           <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
             <div data-local-library-guide="nav">
-              <LibraryNavItem active={availability === 'active' && !favoritesOnly && !livePhotoOnly && !folder && tagIds.length === 0 && collectionIds.length === 0} icon={Images} label={copy.allPhotos} count={snapshot.assetCount} onClick={() => { setAvailability('active'); setFavoritesOnly(false); setLivePhotoOnly(false); setFolder('') }} />
-              <LibraryNavItem active={availability === 'active' && livePhotoOnly} icon={LivePhotoIcon} label="Live Photo" count={livePhotoCount} onClick={() => { setAvailability('active'); setFavoritesOnly(false); setLivePhotoOnly(true); setFolder('') }} />
-              <div data-local-library-logical-target {...assetDropHandlers((ids) => void applyOrganizationDrop(ids, { kind: 'favorite' }), 'link')}><LibraryNavItem active={availability === 'active' && favoritesOnly} icon={Heart} label={copy.favorites} count={favoriteCount} onClick={() => { setAvailability('active'); setFavoritesOnly(true); setLivePhotoOnly(false); setFolder('') }} /></div>
+              <LibraryNavItem active={availability === 'active' && !favoritesOnly && !livePhotoOnly && !videoOnly && !folder && tagIds.length === 0 && collectionIds.length === 0} icon={Layers} label={copy.allPhotos} count={snapshot.assetCount} onClick={() => { setAvailability('active'); setFavoritesOnly(false); setLivePhotoOnly(false); setVideoOnly(false); setFolder('') }} />
+              <LibraryNavItem active={availability === 'active' && livePhotoOnly} icon={LivePhotoIcon} label="Live Photo" count={livePhotoCount} onClick={() => { setAvailability('active'); setFavoritesOnly(false); setLivePhotoOnly(true); setVideoOnly(false); setFolder('') }} />
+              <LibraryNavItem active={availability === 'active' && videoOnly} icon={Film} label={copy.videos} count={videoCount} onClick={() => { setAvailability('active'); setFavoritesOnly(false); setLivePhotoOnly(false); setVideoOnly(true); setClipsOnly(false); setFolder(''); setTagIds([]); setCollectionIds([]) }} />
+              <div data-local-library-logical-target {...assetDropHandlers((ids) => void applyOrganizationDrop(ids, { kind: 'favorite' }), 'link')}><LibraryNavItem active={availability === 'active' && favoritesOnly} icon={Heart} label={copy.favorites} count={favoriteCount} onClick={() => { setAvailability('active'); setFavoritesOnly(true); setLivePhotoOnly(false); setVideoOnly(false); setFolder('') }} /></div>
             </div>
             <div data-local-library-guide="folders">
               <LibrarySidebarSection open={foldersOpen} onToggle={() => toggleSection('localFolders')} label={copy.folders}>
@@ -1730,9 +1752,9 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
                   target={{ relativePath: '', name: copy.root, isRoot: true }} copy={copy}
                   onCreate={setCreateFolderParent} onOpenInFileManager={(target) => void openFolderInFileManager(target)} onRename={() => undefined} onMove={() => undefined} onProperties={setPropertiesFolder} onDelete={setDeleteFolderTarget}
                 >
-                  <button type="button" onClick={() => { setAvailability('active'); setFavoritesOnly(false); setFolder('') }}
+                  <button type="button" onClick={() => { setAvailability('active'); setFavoritesOnly(false); setFolder(''); setVideoOnly(false) }}
                     className="mb-0.5 flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs transition hover:bg-secondary"
-                    style={{ backgroundColor: assetDropTargetFolder === '' || folderDropTarget === '' ? 'var(--primary)' : availability === 'active' && !favoritesOnly && !folder && tagIds.length === 0 && collectionIds.length === 0 ? 'var(--accent)' : undefined, color: assetDropTargetFolder === '' || folderDropTarget === '' ? 'var(--primary-foreground)' : undefined, boxShadow: assetDropTargetFolder === '' || folderDropTarget === '' ? '0 0 0 2px color-mix(in srgb, var(--primary) 30%, transparent)' : undefined }}>
+                    style={{ backgroundColor: assetDropTargetFolder === '' || folderDropTarget === '' ? 'var(--primary)' : availability === 'active' && !favoritesOnly && !livePhotoOnly && !videoOnly && !folder && tagIds.length === 0 && collectionIds.length === 0 ? 'var(--accent)' : undefined, color: assetDropTargetFolder === '' || folderDropTarget === '' ? 'var(--primary-foreground)' : undefined, boxShadow: assetDropTargetFolder === '' || folderDropTarget === '' ? '0 0 0 2px color-mix(in srgb, var(--primary) 30%, transparent)' : undefined }}>
                     <FolderOpen size={15} /><span className="min-w-0 flex-1 truncate">{copy.root}</span><span className="shrink-0 truncate text-[9px]" style={{ color: 'var(--muted-foreground)' }} title={snapshot.rootPath}>{snapshot.rootPath}</span>
                   </button>
                 </FolderContextTarget>
@@ -1742,7 +1764,7 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
               </LibrarySidebarSection>
             </div>
             <OrganizationNavigation copy={copy} tags={tags} groups={collectionGroups} collections={collections} selectedTagIds={tagIds} selectedCollectionIds={collectionIds}
-              onSelectTags={(ids) => { setAvailability('active'); setFavoritesOnly(false); setTagIds(ids) }} onSelectCollections={(ids) => { setAvailability('active'); setFavoritesOnly(false); setCollectionIds(ids) }}
+              onSelectTags={(ids) => { setAvailability('active'); setFavoritesOnly(false); setVideoOnly(false); setTagIds(ids) }} onSelectCollections={(ids) => { setAvailability('active'); setFavoritesOnly(false); setVideoOnly(false); setCollectionIds(ids) }}
               onEdit={setOrganizationEditor} onDelete={setOrganizationDelete} onDropAssets={(ids, target) => { if (target.kind === 'collection') setPendingCollectionDrop({ assetIds: ids, collectionId: target.id }); else void applyOrganizationDrop(ids, target) }} />
             <LibrarySidebarSection label={copy.colors} icon={Palette} open={colorsOpen} onToggle={() => toggleSection('localColors')}>
               <div className="space-y-0.5">
@@ -1769,9 +1791,9 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
           </div>
           <div className="mt-3 shrink-0 rounded-lg border p-3 text-[10px] leading-4" style={{ borderColor: 'var(--border)', color: 'var(--muted-foreground)' }}>
             <div className="grid grid-cols-3 gap-1 text-center">
-              <StatButton active={availability === 'active' && !favoritesOnly && !livePhotoOnly && !folder && tagIds.length === 0 && collectionIds.length === 0} value={snapshot.assetCount} label={copy.allPhotos} onClick={() => { setAvailability('active'); setFavoritesOnly(false); setLivePhotoOnly(false); setFolder('') }} />
-              <StatButton active={availability === 'missing'} value={snapshot.missingCount} label={copy.missing} onClick={() => { setAvailability('missing'); setFavoritesOnly(false); setLivePhotoOnly(false); setFolder('') }} />
-              <StatButton active={availability === 'trashed'} value={snapshot.trashCount} label={copy.inTrash} onClick={() => { setAvailability('trashed'); setFavoritesOnly(false); setLivePhotoOnly(false); setFolder('') }} />
+              <StatButton active={availability === 'active' && !favoritesOnly && !livePhotoOnly && !videoOnly && !folder && tagIds.length === 0 && collectionIds.length === 0} value={snapshot.assetCount} label={copy.allPhotos} onClick={() => { setAvailability('active'); setFavoritesOnly(false); setLivePhotoOnly(false); setVideoOnly(false); setFolder('') }} />
+              <StatButton active={availability === 'missing'} value={snapshot.missingCount} label={copy.missing} onClick={() => { setAvailability('missing'); setFavoritesOnly(false); setLivePhotoOnly(false); setVideoOnly(false); setFolder('') }} />
+              <StatButton active={availability === 'trashed'} value={snapshot.trashCount} label={copy.inTrash} onClick={() => { setAvailability('trashed'); setFavoritesOnly(false); setLivePhotoOnly(false); setVideoOnly(false); setFolder('') }} />
             </div>
           </div>
         </aside>
@@ -1785,6 +1807,12 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
               <input type="checkbox" checked={directFolderOnly} onChange={(event) => setDirectFolderOnly(event.target.checked)} />
               {copy.hideSubfolderPhotos}
             </label>
+            {videoOnly && (
+              <label className="flex h-8 shrink-0 cursor-pointer items-center gap-2 rounded-md border bg-input px-2.5 text-[10px]">
+                <input type="checkbox" checked={clipsOnly} onChange={(event) => setClipsOnly(event.target.checked)} />
+                {copy.clips.filterWithClips}
+              </label>
+            )}
             <LibraryViewToggle
               value={viewMode}
               onChange={(value) => setViewMode(value as typeof viewMode)}
@@ -1857,7 +1885,7 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
               {repairMenuOpen && (
                 <>
                   <button type="button" aria-label={copy.cancelAction} onClick={() => setRepairMenuOpen(false)} className="fixed inset-0 z-30 cursor-default" />
-                  <div className="absolute bottom-full right-0 z-40 mb-1 w-44 overflow-hidden rounded-lg border py-1 shadow-lg" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--popover)' }}>
+                  <div className="desktop-menu-surface absolute bottom-full right-0 z-40 mb-1 w-44 overflow-hidden rounded-lg border py-1 shadow-lg" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--popover)' }}>
                     <button type="button" onClick={() => { setRepairMenuOpen(false); setRepairDialogOpen(true) }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-secondary" style={{ color: 'var(--foreground)' }}><Wrench size={14} />{copy.repairThumbnails}</button>
                   </div>
                 </>
@@ -1878,14 +1906,16 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
         <div className="col-start-3 row-start-2 min-h-0 overflow-hidden">
           <LocalAssetDetails asset={selectedAsset} copy={copy} rootPath={snapshot.rootPath} saving={saving} maintenanceBusy={missingMaintenanceBusy || previewMaintenanceBusy} tags={tags} collections={collections} organizationBusy={organizationBusy} onSave={saveAsset}
             onPreview={(asset) => { if (asset.availability !== 'missing') setPreviewAsset(asset) }} onOpenSystem={openSystem} onMove={openMoveAsset} onDelete={setDeleteAsset} onRestore={restoreAsset}
+            onPlayClip={playClipFromDetails}
             onRetryPreview={retryPreview} onRecheckMissing={recheckMissing} onRemoveMissing={(asset) => setRemoveMissingAsset(asset)} onSetTags={setAssetTags} onCreateTag={createTagFromDetails} onSetCollections={setAssetCollections} onUpload={openUploadSettings} />
         </div>
       </div>
 
       {dropTargetFolder !== null && <div className="pointer-events-none absolute inset-3 z-50 flex items-center justify-center rounded-xl border-2 border-dashed bg-background/90 backdrop-blur" style={{ borderColor: 'var(--primary)' }}><div className="text-center"><Upload size={30} className="mx-auto mb-3" style={{ color: 'var(--primary)' }} /><p className="text-sm font-medium">{copy.drop}</p><p className="mt-1 text-xs" style={{ color: 'var(--muted-foreground)' }}>{dropTargetFolder || copy.root}</p></div></div>}
-      {previewAsset && <LocalLibraryPreview asset={previewAsset} copy={copy} onClose={() => setPreviewAsset(null)} onOpenSystem={openSystem}
+      {previewAsset && <LocalLibraryPreview asset={previewAsset} copy={copy} onClose={() => { setPreviewAsset(null); setPreviewClip(null) }} onOpenSystem={openSystem}
         hasPrevious={Boolean(previewNeighbors.previous)} hasNext={Boolean(previewNeighbors.next)}
-        onPrevious={() => previewNeighbors.previous && setPreviewAsset(previewNeighbors.previous)} onNext={() => void previewNext()} />}
+        initialClip={previewClip ? { startMs: previewClip.startMs, endMs: previewClip.endMs, title: previewClip.title } : null}
+        onPrevious={() => { setPreviewClip(null); if (previewNeighbors.previous) setPreviewAsset(previewNeighbors.previous) }} onNext={() => { setPreviewClip(null); void previewNext() }} />}
       {backupDialogOpen && <LocalLibraryBackupDialog copy={copy} overview={backupOverview} loading={backupLoading} operation={backupOperation} onClose={() => setBackupDialogOpen(false)} onCreate={createBackup} onRestore={restoreBackup} />}
       {organizationEditor && <OrganizationEditorDialog target={organizationEditor} groups={collectionGroups} copy={copy} busy={organizationBusy} onClose={() => setOrganizationEditor(null)} onSubmit={(value) => void saveOrganization(value)} />}
       {organizationDelete && <DeleteOrganizationDialog copy={copy} busy={organizationBusy} title={organizationDelete.kind === 'tag' ? copy.deleteTagTitle : organizationDelete.kind === 'collection' ? copy.deleteCollectionTitle : copy.deleteCollectionGroupTitle} body={organizationDelete.kind === 'tag' ? copy.deleteTagBody : organizationDelete.kind === 'collection' ? copy.deleteCollectionBody : organizationDelete.nonEmpty ? copy.deleteCollectionGroupBody : copy.deleteEmptyCollectionGroupBody} dangerousLabel={organizationDelete.kind === 'group' && organizationDelete.nonEmpty ? copy.deleteGroupContents : copy.confirmPermanent} onClose={() => setOrganizationDelete(null)} onConfirm={() => void deleteOrganization(Boolean(organizationDelete.nonEmpty))} />}

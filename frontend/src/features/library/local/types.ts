@@ -167,6 +167,7 @@ export interface LocalAsset {
   mediaKind: string
   byteSize: number
   modifiedAtNs: number
+  durationMs?: number
   width: number
   height: number
   orientation: number
@@ -207,6 +208,8 @@ export interface LocalAsset {
   isUploaded: boolean
   tags: LocalTag[]
   collections: AssetCollection[]
+  /** Number of logical media segments marked on this asset. */
+  clipCount?: number
 }
 
 export interface AssetPage {
@@ -256,6 +259,8 @@ export interface AssetQuery extends AssetStructuredFilters {
   favoritesOnly?: boolean
   photosOnly?: boolean
   livePhotoOnly?: boolean
+  videoOnly?: boolean
+  withClipsOnly?: boolean
   tagIds?: string[]
   collectionIds?: string[]
   sort?: AssetSort
@@ -263,6 +268,8 @@ export interface AssetQuery extends AssetStructuredFilters {
 }
 
 const PHOTO_FORMATS = new Set(['jpeg', 'png', 'gif', 'webp', 'tiff', 'heif', 'avif', 'cr2', 'cr3', 'nef', 'arw', 'dng', 'raf', 'rw2'])
+const VIDEO_FORMATS = new Set(['mp4', 'mov'])
+const AUDIO_FORMATS = new Set(['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg'])
 
 /** True when the asset is a photo that supports an image preview (vs. a generic file). */
 export function isPhotoAsset(asset: Pick<LocalAsset, 'mediaKind' | 'format'>): boolean {
@@ -270,6 +277,79 @@ export function isPhotoAsset(asset: Pick<LocalAsset, 'mediaKind' | 'format'>): b
   if (asset.mediaKind === 'image' || asset.mediaKind === 'live-photo') return true
   // Fallback for assets reported by an older backend that does not emit mediaKind.
   return PHOTO_FORMATS.has(asset.format.toLowerCase())
+}
+
+/** True for playable video assets (mp4 / mov). */
+export function isVideoAsset(asset: Pick<LocalAsset, 'mediaKind' | 'format'>): boolean {
+  if (asset.mediaKind === 'video') return true
+  if (asset.mediaKind === 'image' || asset.mediaKind === 'live-photo' || asset.mediaKind === 'audio' || asset.mediaKind === 'file') return false
+  return VIDEO_FORMATS.has(asset.format.toLowerCase())
+}
+
+/** True for playable audio assets (mp3 / m4a / aac / wav / flac / ogg). */
+export function isAudioAsset(asset: Pick<LocalAsset, 'mediaKind' | 'format'>): boolean {
+  if (asset.mediaKind === 'audio') return true
+  if (asset.mediaKind === 'image' || asset.mediaKind === 'live-photo' || asset.mediaKind === 'video' || asset.mediaKind === 'file') return false
+  return AUDIO_FORMATS.has(asset.format.toLowerCase())
+}
+
+/** True for playable media that supports the clip marker (video or audio). */
+export function isPlayableAsset(asset: Pick<LocalAsset, 'mediaKind' | 'format'>): boolean {
+  return isVideoAsset(asset) || isAudioAsset(asset)
+}
+
+/** One logical media segment: a database record of mark-in / mark-out points. */
+export interface LocalAssetClip {
+  id: string
+  assetId: string
+  title: string
+  notes?: string
+  startMs: number
+  endMs: number
+  colorLabel?: string
+  rating: number
+  createdAt?: string
+  updatedAt?: string
+  assetFileName?: string
+  assetRelativePath?: string
+  assetFormat?: string
+  assetKind?: string
+  assetDurationMs?: number
+  thumbnailUrl?: string
+}
+
+export interface LocalClipPage {
+  items: LocalAssetClip[]
+  nextCursor?: string
+  total: number
+}
+
+export interface LocalClipQuery {
+  assetId?: string
+  limit?: number
+  cursor?: string
+}
+
+export interface LocalClipExportProgress {
+  clipId: string
+  state: 'started' | 'progress' | 'completed' | 'failed' | 'cancelled' | string
+  percent?: number
+  outputPath?: string
+  error?: string
+}
+
+/** Format milliseconds as m:ss or h:mm:ss. Pass showTenths for a trimming-grade timecode. */
+export function formatTimecode(ms: number, showTenths = false): string {
+  const totalSeconds = Math.max(0, ms / 1000)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = Math.floor(totalSeconds % 60)
+  const base = hours > 0
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+    : `${minutes}:${String(seconds).padStart(2, '0')}`
+  if (!showTenths) return base
+  const tenths = Math.floor((totalSeconds - Math.floor(totalSeconds)) * 10)
+  return `${base}.${tenths}`
 }
 
 export interface BatchAssetOrganizationUpdate {

@@ -50,6 +50,7 @@ type derivativeSource struct {
 	Orientation  int
 	Format       string
 	Extension    string
+	MediaKind    string
 }
 
 type derivativeRequest struct {
@@ -429,7 +430,7 @@ func isHexString(value string) bool {
 }
 
 func (m *Manager) queueThumbnail(session *librarySession, id AssetID) {
-	if source, err := session.store.derivativeSource(session.ctx, id); err != nil || isRAWFormat(source.Format) || isRAWExtension(source.Extension) {
+	if source, err := session.store.derivativeSource(session.ctx, id); err != nil || isRAWFormat(source.Format) || isRAWExtension(source.Extension) || isTimedMediaKind(source.MediaKind) {
 		return
 	}
 	_, _ = m.requestDerivative(session.ctx, session, id, derivativeThumbnail, derivativePriorityBackground, false)
@@ -438,7 +439,7 @@ func (m *Manager) queueThumbnail(session *librarySession, id AssetID) {
 // queueThumbnailCandidate skips the asset lookup when the caller already knows
 // the format, which is the case for every asset the scan just indexed.
 func (m *Manager) queueThumbnailCandidate(session *librarySession, candidate thumbnailCandidate) {
-	if isRAWFormat(candidate.Format) || isRAWExtension(candidate.Extension) {
+	if isRAWFormat(candidate.Format) || isRAWExtension(candidate.Extension) || isVideoExtension(candidate.Extension) || isAudioExtension(candidate.Extension) {
 		return
 	}
 	_, _ = m.requestDerivative(session.ctx, session, candidate.ID, derivativeThumbnail, derivativePriorityBackground, false)
@@ -536,9 +537,17 @@ func (m *Manager) generateDerivative(ctx context.Context, session *librarySessio
 		}
 	}
 
+	// Playable media has no Go-side renderer: its grid thumbnail is a
+	// frontend-captured poster. When no poster has been committed yet, report
+	// "unavailable" without recording a failure so the pending state survives
+	// until the frontend uploads the frame.
+	if isTimedMediaKind(request.source.MediaKind) {
+		result.status = "unavailable"
+		return result
+	}
+
 	var rawSlot chan struct{}
-	if request.variant == derivativeThumbnail && (isRAWFormat(request.source.Format) || isRAWExtension(request.source.Extension)) && session.rawDerivativeSem != nil {
-		rawSlot = session.rawDerivativeSem
+	if request.variant == derivativeThumbnail && (isRAWFormat(request.source.Format) || isRAWExtension(request.source.Extension)) && session.rawDerivativeSem != nil {		rawSlot = session.rawDerivativeSem
 		select {
 		case rawSlot <- struct{}{}:
 		case <-ctx.Done():

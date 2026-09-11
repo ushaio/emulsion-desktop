@@ -75,6 +75,8 @@ export function CreateFilmRoll(arg1:services.CreateFilmRollParams):Promise<servi
 
 export function CreateFriend(arg1:services.CreateFriendParams):Promise<services.FriendDTO>;
 
+export function CreateLocalAssetClip(arg1:local_library.CreateAssetClipInput):Promise<local_library.AssetClipDTO>;
+
 export function CreateLocalAssetQueryToken(arg1:local_library.AssetQuery):Promise<local_library.AssetQueryToken>;
 
 export function CreateLocalLibrary(arg1:string,arg2:string):Promise<local_library.LibrarySnapshot>;
@@ -105,6 +107,8 @@ export function DeleteFilmRoll(arg1:string):Promise<void>;
 
 export function DeleteFriend(arg1:string):Promise<void>;
 
+export function DeleteLocalAssetClip(arg1:string):Promise<void>;
+
 export function DeleteLocalAssetCloud(arg1:string,arg2:boolean):Promise<void>;
 
 export function DeleteLocalAssetCloudAndLocal(arg1:string,arg2:boolean):Promise<void>;
@@ -125,6 +129,8 @@ export function DeleteStory(arg1:string):Promise<void>;
 
 export function DeleteZineProject(arg1:string):Promise<void>;
 
+export function DetectLocalLibraryFFmpeg():Promise<string>;
+
 export function DisconnectSite():Promise<void>;
 
 export function DiscoverAgentMCPServerTools(arg1:string):Promise<agent_extensions.MCPServer>;
@@ -140,6 +146,8 @@ export function DownloadUpdate():Promise<services.UpdateDownloadResult>;
 export function ExecuteLocalAssetMovePlan(arg1:string):Promise<local_library.AssetFileOperationExecution>;
 
 export function ExecuteLocalLibraryFolderMovePlan(arg1:string):Promise<local_library.FolderFileOperationExecution>;
+
+export function ExportLocalAssetClip(arg1:string):Promise<local_library.ClipExportProgress>;
 
 export function FetchURLMetadata(arg1:string):Promise<main.FetchURLMetadataResult>;
 
@@ -299,11 +307,15 @@ export function ListDesktopSystemPluginVersions(arg1:string):Promise<Array<stora
 
 export function ListInspirationSubscriptions():Promise<Array<services.InspirationSubscription>>;
 
+export function ListLocalAssetClips(arg1:string):Promise<Array<local_library.AssetClipDTO>>;
+
 export function ListLocalAssets(arg1:local_library.AssetQuery):Promise<local_library.AssetPage>;
 
 export function ListLocalDrafts():Promise<Array<string>>;
 
 export function ListLocalFolders():Promise<Array<local_library.FolderDTO>>;
+
+export function ListLocalLibraryClips(arg1:local_library.ClipListQuery):Promise<local_library.ClipPage>;
 
 export function ListLocalLibraryCollectionGroups():Promise<Array<local_library.CollectionGroupDTO>>;
 
@@ -404,6 +416,8 @@ export function ReorderFilmRollFrames(arg1:string):Promise<services.FilmRollDTO>
 export function ReorderFriends(arg1:Array<services.ReorderFriendItem>):Promise<void>;
 
 export function ReorderStoryPhotos(arg1:string,arg2:Array<string>):Promise<services.StoryDTO>;
+
+export function ReportLocalAssetMediaMetadata(arg1:string,arg2:number,arg3:number,arg4:number):Promise<void>;
 
 export function RestoreLocalAsset(arg1:string):Promise<void>;
 
@@ -522,6 +536,8 @@ export function UpdateFilmRoll(arg1:string,arg2:services.UpdateFilmRollParams):P
 export function UpdateFriend(arg1:string,arg2:services.UpdateFriendParams):Promise<services.FriendDTO>;
 
 export function UpdateLocalAsset(arg1:string,arg2:string,arg3:string,arg4:number,arg5:string,arg6:boolean):Promise<void>;
+
+export function UpdateLocalAssetClip(arg1:string,arg2:local_library.UpdateAssetClipPatch):Promise<local_library.AssetClipDTO>;
 
 export function UpdateLocalLibraryCollection(arg1:string,arg2:any,arg3:string,arg4:string,arg5:number):Promise<local_library.CollectionDTO>;
 

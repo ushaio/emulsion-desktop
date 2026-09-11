@@ -4,6 +4,7 @@ import { CloudIcon } from "@/components/icons/CloudIcons";
 import type { LocalAsset } from "../../types";
 import type { LocalLibraryCopy } from "../../copy";
 import { formatBytes } from "./format";
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 export function CloudInfoDialog({
   copy,
@@ -43,9 +44,9 @@ export function CloudInfoDialog({
       <div
         role="dialog"
         aria-modal="true"
-        className="fixed left-1/2 top-1/2 z-[9999] w-[min(92vw,24rem)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl border shadow-2xl"
+        className="desktop-dialog-surface fixed left-1/2 top-1/2 z-[9999] w-[min(92vw,24rem)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl border shadow-2xl"
         style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}
-      >
+      ><GlassBackdrop material="regular" />
         <div
           className="flex items-center justify-between px-4 py-3"
           style={{ borderBottom: "1px solid var(--border)" }}

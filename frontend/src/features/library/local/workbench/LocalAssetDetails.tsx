@@ -3,18 +3,22 @@ import {
   Camera,
   Check,
   Copy,
+  Download,
   ExternalLink,
   EyeOff,
   FileText,
+  Film,
   FolderInput,
   Heart,
   ImageOff,
   Info,
   Loader2,
   Pencil,
+  Play,
   Plus,
   RefreshCw,
   RotateCcw,
+  Scissors,
   Tag as TagIcon,
   Trash2,
   Upload,
@@ -40,9 +44,10 @@ import {
   LibrarySavingHint,
 } from "@/components/ui/library";
 import { CloudIcon, CloudOffIcon } from "@/components/icons/CloudIcons";
-import { isPhotoAsset } from "../types";
-import type { LocalAsset, LocalCollection, LocalTag } from "../types";
+import { formatTimecode, isPhotoAsset, isPlayableAsset, isVideoAsset } from "../types";
+import type { LocalAsset, LocalAssetClip, LocalCollection, LocalTag } from "../types";
 import type { LocalLibraryCopy } from "../copy";
+import { useAssetClips, useClipExport } from "./useAssetClips";
 
 interface Props {
   asset: LocalAsset | null;
@@ -74,6 +79,8 @@ interface Props {
   onSetCollections: (assetId: string, collectionIds: string[]) => Promise<void>;
   /** 从信息栏发起上传（打开上传设置弹窗）。 */
   onUpload: (asset: LocalAsset) => void;
+  /** 在播放器中播放资产的某个片段。 */
+  onPlayClip?: (asset: LocalAsset, clip: LocalAssetClip) => void;
 }
 
 import {
@@ -117,6 +124,7 @@ function LocalAssetDetailsContent({
   onCreateTag,
   onSetCollections,
   onUpload,
+  onPlayClip,
 }: Props) {
   const [title, setTitle] = useState(asset?.displayTitle || "");
   const [notes, setNotes] = useState(asset?.notes || "");
@@ -135,12 +143,23 @@ function LocalAssetDetailsContent({
   const [fileInfoOpen, setFileInfoOpen] = useState(true);
   const [notesOpen, setNotesOpen] = useState(false);
   const [cloudInfoOpen, setCloudInfoOpen] = useState(false);
+  const [clipsOpen, setClipsOpen] = useState(true);
   const [pathCopied, setPathCopied] = useState(false);
   const [assignedTagIds, setAssignedTagIds] = useState<string[]>(
     () => asset?.tags.map((tag) => tag.id) || [],
   );
   const notesEditorRef = useRef<HTMLDivElement>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
+
+  const isPlayable = Boolean(asset && isPlayableAsset(asset));
+  const clipsState = useAssetClips(isPlayable && asset ? asset.id : undefined);
+  const clipExport = useClipExport({
+    started: copy.clips.exportStarted,
+    completed: copy.clips.exportCompleted,
+    failed: copy.clips.exportFailed,
+    cancelled: copy.clips.exportCancelled,
+    ffmpegMissingBody: copy.clips.ffmpegMissingBody,
+  });
 
   const savePatch = useCallback(
     (
@@ -324,6 +343,13 @@ function LocalAssetDetailsContent({
             alt=""
             className="h-full w-full object-cover"
           />
+        ) : asset.previewStatus === "ready" && isVideoAsset(asset) ? (
+          // 视频缩略图来自前端截帧上传的 poster，走 thumbnail 请求路径。
+          <img
+            src={asset.thumbnailUrl}
+            alt=""
+            className="h-full w-full object-cover"
+          />
         ) : previewPending && isPhoto ? (
           <div
             className="flex flex-col items-center gap-2.5"
@@ -332,6 +358,21 @@ function LocalAssetDetailsContent({
             <Loader2 size={22} className="animate-spin" />
             <span className="text-[10px]">{copy.generatingPreview}</span>
           </div>
+        ) : isVideoAsset(asset) ? (
+          <span
+            className="flex flex-col items-center gap-2"
+            style={{ color: "var(--muted-foreground)" }}
+          >
+            <Film size={28} strokeWidth={1.2} />
+            <span className="text-[10px] font-bold uppercase tracking-widest">
+              {asset.format}
+            </span>
+            {asset.durationMs ? (
+              <span className="font-mono text-[10px]">
+                {formatTimecode(asset.durationMs)}
+              </span>
+            ) : null}
+          </span>
         ) : isPhoto ? (
           <ImageOff
             size={26}
@@ -659,6 +700,83 @@ function LocalAssetDetailsContent({
     </div>
   );
 
+  /* ── 合并卡片补充段：视频/音频的片段列表 ── */
+  const clipsSegment = isPlayable && asset && !missing && !trashed && (
+    <LibraryDetailsSection
+      label={copy.clips.sectionTitle}
+      icon={Scissors}
+      open={clipsOpen}
+      onToggle={() => setClipsOpen((v) => !v)}
+      count={clipsState.clips.length}
+    >
+      <div className="space-y-1">
+        {clipsState.loading && (
+          <div className="flex items-center justify-center gap-2 py-3 text-[10px]" style={{ color: "var(--muted-foreground)" }}>
+            <Loader2 size={12} className="animate-spin" />
+          </div>
+        )}
+        {!clipsState.loading && clipsState.clips.length === 0 && (
+          <div className="px-1 py-2 text-[10px] leading-4" style={{ color: "var(--muted-foreground)" }}>
+            {copy.clips.sectionEmpty}
+            <div>{copy.clips.sectionHint}</div>
+          </div>
+        )}
+        {clipsState.clips.map((clip) => {
+          const exporting = clipExport.exportingClipId === clip.id
+          return (
+            <div
+              key={clip.id}
+              className="flex items-center gap-2 rounded-md border px-2.5 py-2"
+              style={{ borderColor: "var(--border)" }}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[11px] font-medium" title={clip.title}>
+                  {clip.title || formatTimecode(clip.startMs)}
+                </div>
+                <div className="font-mono text-[10px] tabular-nums" style={{ color: "var(--muted-foreground)" }}>
+                  {formatTimecode(clip.startMs)} – {formatTimecode(clip.endMs)}
+                </div>
+              </div>
+              <button
+                type="button"
+                title={copy.clips.play}
+                onClick={() => onPlayClip?.(asset, clip)}
+                className="flex size-7 shrink-0 items-center justify-center rounded-md border transition-colors hover:bg-secondary"
+                style={{ borderColor: "var(--border)", color: "var(--muted-foreground)" }}
+              >
+                <Play size={12} />
+              </button>
+              <button
+                type="button"
+                disabled={!clipExport.ffmpegAvailable || exporting}
+                title={!clipExport.ffmpegAvailable ? copy.clips.exportDisabledHint : copy.clips.export}
+                onClick={() => void clipExport.exportClip(clip.id)}
+                className="flex size-7 shrink-0 items-center justify-center rounded-md border transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40"
+                style={{ borderColor: "var(--border)", color: "var(--muted-foreground)" }}
+              >
+                {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+              </button>
+              <button
+                type="button"
+                title={copy.clips.deleteClip}
+                onClick={() => void clipsState.deleteClip(clip.id)}
+                className="flex size-7 shrink-0 items-center justify-center rounded-md border transition-colors hover:bg-red-500/10"
+                style={{ borderColor: "var(--border)", color: "var(--muted-foreground)" }}
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          )
+        })}
+        {(clipsState.error || clipExport.exportMessage) && (
+          <div className="px-1 py-1.5 text-[10px] leading-4" style={{ color: "#B45309" }}>
+            {clipsState.error || clipExport.exportMessage}
+          </div>
+        )}
+      </div>
+    </LibraryDetailsSection>
+  );
+
   return (
     <LibraryDetailsPanel data-local-library-guide="details">
       {/* ── 顶部合并卡片：预览图 + 标题 + 标记工具条 ── */}
@@ -667,6 +785,9 @@ function LocalAssetDetailsContent({
         title={titleSegment}
         marks={marksSegment}
       />
+
+      {/* ── 视频/音频片段列表 ── */}
+      {clipsSegment}
 
       {/* ── 云端同步状态卡片（参考稿 .sync 区块）：
           已上传 → 主色图标方块 + 云端路径 + 查看云端信息按钮；

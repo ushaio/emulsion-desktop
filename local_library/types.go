@@ -52,6 +52,9 @@ const (
 	ErrLibraryMaintenance       ErrorCode = "LIBRARY_MAINTENANCE"
 	ErrBackupNotFound           ErrorCode = "BACKUP_NOT_FOUND"
 	ErrBackupInvalid            ErrorCode = "BACKUP_INVALID"
+	ErrClipNotFound             ErrorCode = "CLIP_NOT_FOUND"
+	ErrClipInvalid              ErrorCode = "CLIP_INVALID"
+	ErrFFmpegUnavailable        ErrorCode = "FFMPEG_UNAVAILABLE"
 )
 
 type AppError struct {
@@ -195,6 +198,7 @@ type AssetDTO struct {
 	MediaKind            string               `json:"mediaKind"`
 	ByteSize             int64                `json:"byteSize"`
 	ModifiedAtNS         int64                `json:"modifiedAtNs"`
+	DurationMS           int64                `json:"durationMs"`
 	Width                int                  `json:"width"`
 	Height               int                  `json:"height"`
 	Orientation          int                  `json:"orientation"`
@@ -235,6 +239,9 @@ type AssetDTO struct {
 	IsUploaded           bool                 `json:"isUploaded"`
 	Tags                 []TagDTO             `json:"tags"`
 	Collections          []AssetCollectionDTO `json:"collections"`
+	// ClipCount is the number of logical media segments marked on this asset.
+	// It drives the "has clips" badge in the asset grid.
+	ClipCount int `json:"clipCount"`
 }
 
 type CloudPhotoChange struct {
@@ -261,6 +268,85 @@ type AssetPage struct {
 	Scan       ScanStatus `json:"scan"`
 }
 
+// AssetClipDTO is one logical media segment (mark-in / mark-out). It is a
+// database record only: playing it means playing the source asset constrained
+// to [StartMS, EndMS), and exporting it is an explicit user action.
+type AssetClipDTO struct {
+	ID         AssetID    `json:"id"`
+	AssetID    AssetID    `json:"assetId"`
+	Title      string     `json:"title"`
+	Notes      string     `json:"notes,omitempty"`
+	StartMS    int64      `json:"startMs"`
+	EndMS      int64      `json:"endMs"`
+	ColorLabel string     `json:"colorLabel,omitempty"`
+	Rating     int        `json:"rating"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
+	// Source asset summary so a library-wide clip list can render without a
+	// second round trip per clip.
+	AssetFileName string `json:"assetFileName,omitempty"`
+	AssetRelativePath string `json:"assetRelativePath,omitempty"`
+	AssetFormat   string `json:"assetFormat,omitempty"`
+	AssetKind     string `json:"assetKind,omitempty"`
+	AssetDuration int64  `json:"assetDurationMs,omitempty"`
+	ThumbnailURL  string `json:"thumbnailUrl,omitempty"`
+	// ModifiedNS/ByteSize are scan targets used to build thumbnail URLs; they
+	// are not serialized to the frontend.
+	ModifiedNS int64 `json:"-"`
+	ByteSize   int64 `json:"-"`
+}
+
+type CreateAssetClipInput struct {
+	AssetID    AssetID `json:"assetId"`
+	Title      string  `json:"title"`
+	StartMS    int64   `json:"startMs"`
+	EndMS      int64   `json:"endMs"`
+	Notes      string  `json:"notes,omitempty"`
+	ColorLabel string  `json:"colorLabel,omitempty"`
+}
+
+// UpdateAssetClipPatch updates clip fields. Pointers separate "leave unchanged"
+// from "clear this value".
+type UpdateAssetClipPatch struct {
+	Title      *string `json:"title,omitempty"`
+	Notes      *string `json:"notes,omitempty"`
+	StartMS    *int64  `json:"startMs,omitempty"`
+	EndMS      *int64  `json:"endMs,omitempty"`
+	ColorLabel *string `json:"colorLabel,omitempty"`
+	Rating     *int    `json:"rating,omitempty"`
+}
+
+// ClipListQuery pages through the clips of the whole library, newest first.
+type ClipListQuery struct {
+	AssetID string `json:"assetId,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
+	Cursor  string `json:"cursor,omitempty"`
+}
+
+type ClipPage struct {
+	Items      []AssetClipDTO `json:"items"`
+	NextCursor string         `json:"nextCursor,omitempty"`
+	Total      int64          `json:"total"`
+}
+
+// ClipExportPlan describes an export before the user picks a destination.
+type ClipExportPlan struct {
+	ClipID          AssetID `json:"clipId"`
+	AssetID         AssetID `json:"assetId"`
+	SuggestedName   string  `json:"suggestedName"`
+	SourceExtension string  `json:"sourceExtension"`
+	DurationMS      int64   `json:"durationMs"`
+}
+
+// ClipExportProgress reports the state of a running or finished clip export.
+type ClipExportProgress struct {
+	ClipID     AssetID `json:"clipId"`
+	State      string  `json:"state"` // started | progress | completed | failed
+	Percent    int     `json:"percent,omitempty"`
+	OutputPath string  `json:"outputPath,omitempty"`
+	Error      string  `json:"error,omitempty"`
+}
+
 type AssetQuery struct {
 	Cursor           string   `json:"cursor,omitempty"`
 	Limit            int      `json:"limit,omitempty"`
@@ -272,6 +358,8 @@ type AssetQuery struct {
 	FavoritesOnly    bool     `json:"favoritesOnly,omitempty"`
 	PhotosOnly       bool     `json:"photosOnly,omitempty"`
 	LivePhotoOnly    bool     `json:"livePhotoOnly,omitempty"`
+	VideoOnly        bool     `json:"videoOnly,omitempty"`
+	WithClipsOnly    bool     `json:"withClipsOnly,omitempty"`
 	TagIDs           []string `json:"tagIds,omitempty"`
 	CollectionIDs    []string `json:"collectionIds,omitempty"`
 	RatingMin        *int     `json:"ratingMin,omitempty"`

@@ -69,6 +69,14 @@ import {
   UpdateLocalLibraryCollectionGroup,
   UpdateLocalLibraryTag,
   SyncLocalLibraryCloud,
+  CreateLocalAssetClip,
+  DeleteLocalAssetClip,
+  DetectLocalLibraryFFmpeg,
+  ExportLocalAssetClip,
+  ListLocalAssetClips,
+  ListLocalLibraryClips,
+  ReportLocalAssetMediaMetadata,
+  UpdateLocalAssetClip,
 } from '../../../../wailsjs/go/main/App'
 import type {
   AssetMaintenanceResult,
@@ -98,6 +106,10 @@ import type {
   LocalTag,
   LocalCollection,
   CollectionGroup,
+  LocalAssetClip,
+  LocalClipExportProgress,
+  LocalClipPage,
+  LocalClipQuery,
   ScanStatus,
 } from './types'
 
@@ -253,6 +265,7 @@ export const localLibraryApi = {
         byteSize: Number(item.byteSize ?? 0),
         mediaKind: String(item.mediaKind ?? 'image'),
         modifiedAtNs: Number(item.modifiedAtNs ?? 0),
+        durationMs: Number(item.durationMs ?? 0) || undefined,
         width: Number(item.width ?? 0),
         height: Number(item.height ?? 0),
         orientation: Number(item.orientation ?? 1),
@@ -294,6 +307,7 @@ export const localLibraryApi = {
         })) : [],
         rating: Number(item.rating ?? 0),
         frameCount: Number(item.frameCount ?? 1),
+        clipCount: Number(item.clipCount ?? 0) || undefined,
         capturedAt: asIsoTime(item.capturedAt),
         discoveredAt: asIsoTime(item.discoveredAt),
       })) : [],
@@ -458,6 +472,53 @@ export const localLibraryApi = {
   openInDefaultApp: (id: string) => OpenLocalAssetInDefaultApp(id),
   openAssetInFileManager: (id: string) => OpenLocalAssetInFileManager(id),
   openFolderInFileManager: (relative: string) => OpenLocalLibraryFolderInFileManager(relative),
+
+  // ─── Clips (logical media segments) ───────────────
+  async listAssetClips(assetId: string): Promise<LocalAssetClip[]> {
+    const source = await ListLocalAssetClips(assetId)
+    return (source || []).map(normalizeClip)
+  },
+  async createAssetClip(input: { assetId: string, title: string, startMs: number, endMs: number, notes?: string, colorLabel?: string }): Promise<LocalAssetClip> {
+    return normalizeClip(await CreateLocalAssetClip(input))
+  },
+  async updateAssetClip(id: string, patch: { title?: string, notes?: string, startMs?: number, endMs?: number, colorLabel?: string, rating?: number }): Promise<LocalAssetClip> {
+    return normalizeClip(await UpdateLocalAssetClip(id, patch))
+  },
+  deleteAssetClip: (id: string) => DeleteLocalAssetClip(id),
+  async listLibraryClips(query: LocalClipQuery = {}): Promise<LocalClipPage> {
+    const source = await ListLocalLibraryClips(query)
+    return {
+      items: (source?.items || []).map(normalizeClip),
+      nextCursor: source?.nextCursor || undefined,
+      total: Number(source?.total ?? 0),
+    }
+  },
+  reportAssetMediaMetadata: (id: string, durationMs: number, width: number, height: number) =>
+    ReportLocalAssetMediaMetadata(id, durationMs, width, height),
+  detectFFmpeg: () => DetectLocalLibraryFFmpeg() as Promise<string>,
+  exportAssetClip: (clipId: string) => ExportLocalAssetClip(clipId) as Promise<LocalClipExportProgress>,
+}
+
+function normalizeClip(source: unknown): LocalAssetClip {
+  const item = source as Record<string, unknown>
+  return {
+    id: String(item.id ?? ''),
+    assetId: String(item.assetId ?? ''),
+    title: String(item.title ?? ''),
+    notes: (item.notes as string) || undefined,
+    startMs: Number(item.startMs ?? 0),
+    endMs: Number(item.endMs ?? 0),
+    colorLabel: (item.colorLabel as string) || undefined,
+    rating: Number(item.rating ?? 0),
+    createdAt: asIsoTime(item.createdAt),
+    updatedAt: asIsoTime(item.updatedAt),
+    assetFileName: (item.assetFileName as string) || undefined,
+    assetRelativePath: (item.assetRelativePath as string) || undefined,
+    assetFormat: (item.assetFormat as string) || undefined,
+    assetKind: (item.assetKind as string) || undefined,
+    assetDurationMs: Number(item.assetDurationMs ?? 0) || undefined,
+    thumbnailUrl: (item.thumbnailUrl as string) || undefined,
+  }
 }
 
 export { normalizeSnapshot }

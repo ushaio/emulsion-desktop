@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { ChevronRight, Copy, File, FileImage, FilePenLine, Folder, FolderInput, FolderOpen, FolderSearch2, Loader2, Play, RefreshCw, RotateCcw, Scissors, Settings2, Trash2, Upload } from 'lucide-react'
+import { ChevronRight, Copy, File, FileImage, FilePenLine, Film, Folder, FolderInput, FolderOpen, FolderSearch2, Loader2, Music, Play, RefreshCw, RotateCcw, Scissors, Settings2, Trash2, Upload } from 'lucide-react'
 import { CloudIcon, CloudOffIcon, CloudWarningIcon } from '@/components/icons/CloudIcons'
 import { LivePhotoCanvas } from '@/components/media/LivePhotoCanvas'
 import {
@@ -16,11 +16,12 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/ContextMenu'
 import { LivePhotoIcon } from '@/components/icons/LivePhotoIcon'
-import { isPhotoAsset } from '../types'
+import { formatTimecode, isAudioAsset, isPhotoAsset, isVideoAsset } from '../types'
 import type { FolderItem, LocalAsset } from '../types'
 import type { types as wailsTypes } from '../../../../../wailsjs/go/models'
 import { LibraryCountBar, LibraryEmptyState, formatLibraryCardSize, LibraryCardBadge, LibraryCardCaption, LibraryCardCheckbox, LibraryCardFavorite, LibraryCardFocusRing, LibraryJustifiedFiller, libraryJustifiedContainerClassName, libraryJustifiedTileStyle, libraryThumbnailClassName, libraryTileStyle } from '@/components/ui/library'
 import type { LocalLibraryCopy } from '../copy'
+import { captureAndUploadVideoPoster } from './poster'
 
 const MASONRY_COLUMN_GAP = 4
 const MASONRY_CARD_CAPTION_HEIGHT = 0
@@ -98,16 +99,30 @@ const AssetCard = memo(function AssetCard({
   const [failedThumbnailUrl, setFailedThumbnailUrl] = useState<string | null>(null)
   const [hovering, setHovering] = useState(false)
   const [liveVideoEnded, setLiveVideoEnded] = useState(false)
+  // 视频缩略图在 poster 上传前会 404；previewStatus 变化（pending → ready）
+  // 时必须清除失败标记并强制 <img> 重挂载，否则卡片会一直停在占位图标。
   const imageFailed = failedThumbnailUrl === asset.thumbnailUrl
+  useEffect(() => {
+    setFailedThumbnailUrl(null)
+  }, [asset.thumbnailUrl, asset.previewStatus])
 
   const label = asset.displayTitle || asset.fileName
   const isPhoto = isPhotoAsset(asset)
+  const isVideo = isVideoAsset(asset)
+  const isAudio = isAudioAsset(asset)
   const isLive = asset.isLivePhoto && !!asset.livePhotoVideoUrl
   const masonry = viewMode === 'masonry'
   const unavailable = asset.availability !== 'active'
   const missing = asset.availability === 'missing'
   const trashed = asset.availability === 'trashed'
   const previewUnavailable = asset.availability === 'active' && asset.previewStatus === 'unavailable'
+
+  // Video thumbnails are frontend-captured poster frames; a mounted card with
+  // a pending preview warms its own poster through the throttled capture queue.
+  useEffect(() => {
+    if (!isVideo || asset.previewStatus !== 'pending' || asset.availability !== 'active') return
+    void captureAndUploadVideoPoster(asset)
+  }, [asset, isVideo])
 
   const aspectRatio = isPhoto && asset.width > 0 && asset.height > 0 ? `${asset.width} / ${asset.height}` : undefined
   const ratio = isPhoto && asset.width > 0 && asset.height > 0 ? asset.width / asset.height : 4 / 3
@@ -159,14 +174,15 @@ const AssetCard = memo(function AssetCard({
           }}
         >
           <span className="block h-full w-full">
-            {isPhoto && !imageFailed && asset.previewStatus !== 'unavailable' ? (
+            {(isPhoto || isVideo) && !imageFailed && asset.previewStatus !== 'unavailable' ? (
               // 只要不是明确生成失败，就渲染 img 去请求缩略图，让处于 pending/generating
               // 的可见资产主动触发 /__local-library/thumbnail 请求，后端便以「可见」优先级
               // 优先生成，而不是等后台预热按序补齐（否则可见优先形同虚设）。
-              <img src={asset.thumbnailUrl} alt={label} loading="lazy" draggable={false} onError={() => setFailedThumbnailUrl(asset.thumbnailUrl)} className={libraryThumbnailClassName(viewMode)} />
+              // 视频的缩略图来自前端截帧上传的 poster，同样走这条请求路径。
+              <img key={`${asset.thumbnailUrl}-${asset.previewStatus}`} src={asset.thumbnailUrl} alt={label} loading="lazy" draggable={false} onError={() => setFailedThumbnailUrl(asset.thumbnailUrl)} className={libraryThumbnailClassName(viewMode)} />
             ) : (
               <span className="flex h-full w-full flex-col items-center justify-center gap-2" style={{ color: 'var(--muted-foreground)' }}>
-                {isPhoto ? <FileImage size={25} strokeWidth={1.4} /> : <File size={25} strokeWidth={1.4} />}
+                {isVideo ? <Film size={25} strokeWidth={1.4} /> : isAudio ? <Music size={25} strokeWidth={1.4} /> : isPhoto ? <FileImage size={25} strokeWidth={1.4} /> : <File size={25} strokeWidth={1.4} />}
                 <span className="max-w-[85%] truncate text-[10px] uppercase tracking-wider">{asset.format}</span>
               </span>
             )}
@@ -187,6 +203,8 @@ const AssetCard = memo(function AssetCard({
           <span className="absolute right-2 top-2 z-20 flex items-center gap-1">
             {isLive && <LibraryCardBadge title="Live Photo"><LivePhotoIcon size={13} /></LibraryCardBadge>}
             {asset.isAnimated && <LibraryCardBadge title="GIF"><Play size={11} fill="currentColor" /></LibraryCardBadge>}
+            {asset.clipCount ? <LibraryCardBadge title={copy.clips.withClipsBadge.replace('{count}', String(asset.clipCount))} color="#38bdf8"><Scissors size={10} /> {asset.clipCount}</LibraryCardBadge> : null}
+            {(isVideo || isAudio) && asset.durationMs ? <LibraryCardBadge title={copy.clips.durationLabel}>{formatTimecode(asset.durationMs)}</LibraryCardBadge> : null}
             {asset.cloudSyncState === 'deleted_remote'
               ? <LibraryCardBadge title={copy.cloudDeletedRemote} color="#f87171"><CloudOffIcon size={13} /></LibraryCardBadge>
               : asset.cloudSyncState === 'conflict'

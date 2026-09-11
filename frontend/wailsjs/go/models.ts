@@ -673,6 +673,68 @@ export namespace image {
 
 export namespace local_library {
 	
+	export class AssetClipDTO {
+	    id: string;
+	    assetId: string;
+	    title: string;
+	    notes?: string;
+	    startMs: number;
+	    endMs: number;
+	    colorLabel?: string;
+	    rating: number;
+	    // Go type: time
+	    createdAt: any;
+	    // Go type: time
+	    updatedAt: any;
+	    assetFileName?: string;
+	    assetRelativePath?: string;
+	    assetFormat?: string;
+	    assetKind?: string;
+	    assetDurationMs?: number;
+	    thumbnailUrl?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AssetClipDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.assetId = source["assetId"];
+	        this.title = source["title"];
+	        this.notes = source["notes"];
+	        this.startMs = source["startMs"];
+	        this.endMs = source["endMs"];
+	        this.colorLabel = source["colorLabel"];
+	        this.rating = source["rating"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.assetFileName = source["assetFileName"];
+	        this.assetRelativePath = source["assetRelativePath"];
+	        this.assetFormat = source["assetFormat"];
+	        this.assetKind = source["assetKind"];
+	        this.assetDurationMs = source["assetDurationMs"];
+	        this.thumbnailUrl = source["thumbnailUrl"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class AssetCollectionDTO {
 	    id: string;
 	    name: string;
@@ -743,6 +805,7 @@ export namespace local_library {
 	    mediaKind: string;
 	    byteSize: number;
 	    modifiedAtNs: number;
+	    durationMs: number;
 	    width: number;
 	    height: number;
 	    orientation: number;
@@ -786,6 +849,7 @@ export namespace local_library {
 	    isUploaded: boolean;
 	    tags: TagDTO[];
 	    collections: AssetCollectionDTO[];
+	    clipCount: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new AssetDTO(source);
@@ -802,6 +866,7 @@ export namespace local_library {
 	        this.mediaKind = source["mediaKind"];
 	        this.byteSize = source["byteSize"];
 	        this.modifiedAtNs = source["modifiedAtNs"];
+	        this.durationMs = source["durationMs"];
 	        this.width = source["width"];
 	        this.height = source["height"];
 	        this.orientation = source["orientation"];
@@ -842,6 +907,7 @@ export namespace local_library {
 	        this.isUploaded = source["isUploaded"];
 	        this.tags = this.convertValues(source["tags"], TagDTO);
 	        this.collections = this.convertValues(source["collections"], AssetCollectionDTO);
+	        this.clipCount = source["clipCount"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1099,6 +1165,8 @@ export namespace local_library {
 	    favoritesOnly?: boolean;
 	    photosOnly?: boolean;
 	    livePhotoOnly?: boolean;
+	    videoOnly?: boolean;
+	    withClipsOnly?: boolean;
 	    tagIds?: string[];
 	    collectionIds?: string[];
 	    ratingMin?: number;
@@ -1143,6 +1211,8 @@ export namespace local_library {
 	        this.favoritesOnly = source["favoritesOnly"];
 	        this.photosOnly = source["photosOnly"];
 	        this.livePhotoOnly = source["livePhotoOnly"];
+	        this.videoOnly = source["videoOnly"];
+	        this.withClipsOnly = source["withClipsOnly"];
 	        this.tagIds = source["tagIds"];
 	        this.collectionIds = source["collectionIds"];
 	        this.ratingMin = source["ratingMin"];
@@ -1318,6 +1388,76 @@ export namespace local_library {
 	        this.bytes = source["bytes"];
 	    }
 	}
+	export class ClipExportProgress {
+	    clipId: string;
+	    state: string;
+	    percent?: number;
+	    outputPath?: string;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ClipExportProgress(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.clipId = source["clipId"];
+	        this.state = source["state"];
+	        this.percent = source["percent"];
+	        this.outputPath = source["outputPath"];
+	        this.error = source["error"];
+	    }
+	}
+	export class ClipListQuery {
+	    assetId?: string;
+	    limit?: number;
+	    cursor?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ClipListQuery(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.assetId = source["assetId"];
+	        this.limit = source["limit"];
+	        this.cursor = source["cursor"];
+	    }
+	}
+	export class ClipPage {
+	    items: AssetClipDTO[];
+	    nextCursor?: string;
+	    total: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ClipPage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.items = this.convertValues(source["items"], AssetClipDTO);
+	        this.nextCursor = source["nextCursor"];
+	        this.total = source["total"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class CloudSyncStatus {
 	    cursor?: string;
 	    // Go type: time
@@ -1389,6 +1529,28 @@ export namespace local_library {
 	        this.parentId = source["parentId"];
 	        this.name = source["name"];
 	        this.position = source["position"];
+	    }
+	}
+	export class CreateAssetClipInput {
+	    assetId: string;
+	    title: string;
+	    startMs: number;
+	    endMs: number;
+	    notes?: string;
+	    colorLabel?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateAssetClipInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.assetId = source["assetId"];
+	        this.title = source["title"];
+	        this.startMs = source["startMs"];
+	        this.endMs = source["endMs"];
+	        this.notes = source["notes"];
+	        this.colorLabel = source["colorLabel"];
 	    }
 	}
 	
@@ -1763,6 +1925,28 @@ export namespace local_library {
 	        this.assetId = source["assetId"];
 	        this.status = source["status"];
 	        this.error = source["error"];
+	    }
+	}
+	export class UpdateAssetClipPatch {
+	    title?: string;
+	    notes?: string;
+	    startMs?: number;
+	    endMs?: number;
+	    colorLabel?: string;
+	    rating?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateAssetClipPatch(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.notes = source["notes"];
+	        this.startMs = source["startMs"];
+	        this.endMs = source["endMs"];
+	        this.colorLabel = source["colorLabel"];
+	        this.rating = source["rating"];
 	    }
 	}
 

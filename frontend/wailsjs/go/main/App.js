@@ -134,6 +134,10 @@ export function CreateFriend(arg1) {
   return window['go']['main']['App']['CreateFriend'](arg1);
 }
 
+export function CreateLocalAssetClip(arg1) {
+  return window['go']['main']['App']['CreateLocalAssetClip'](arg1);
+}
+
 export function CreateLocalAssetQueryToken(arg1) {
   return window['go']['main']['App']['CreateLocalAssetQueryToken'](arg1);
 }
@@ -194,6 +198,10 @@ export function DeleteFriend(arg1) {
   return window['go']['main']['App']['DeleteFriend'](arg1);
 }
 
+export function DeleteLocalAssetClip(arg1) {
+  return window['go']['main']['App']['DeleteLocalAssetClip'](arg1);
+}
+
 export function DeleteLocalAssetCloud(arg1, arg2) {
   return window['go']['main']['App']['DeleteLocalAssetCloud'](arg1, arg2);
 }
@@ -234,6 +242,10 @@ export function DeleteZineProject(arg1) {
   return window['go']['main']['App']['DeleteZineProject'](arg1);
 }
 
+export function DetectLocalLibraryFFmpeg() {
+  return window['go']['main']['App']['DetectLocalLibraryFFmpeg']();
+}
+
 export function DisconnectSite() {
   return window['go']['main']['App']['DisconnectSite']();
 }
@@ -264,6 +276,10 @@ export function ExecuteLocalAssetMovePlan(arg1) {
 
 export function ExecuteLocalLibraryFolderMovePlan(arg1) {
   return window['go']['main']['App']['ExecuteLocalLibraryFolderMovePlan'](arg1);
+}
+
+export function ExportLocalAssetClip(arg1) {
+  return window['go']['main']['App']['ExportLocalAssetClip'](arg1);
 }
 
 export function FetchURLMetadata(arg1) {
@@ -582,6 +598,10 @@ export function ListInspirationSubscriptions() {
   return window['go']['main']['App']['ListInspirationSubscriptions']();
 }
 
+export function ListLocalAssetClips(arg1) {
+  return window['go']['main']['App']['ListLocalAssetClips'](arg1);
+}
+
 export function ListLocalAssets(arg1) {
   return window['go']['main']['App']['ListLocalAssets'](arg1);
 }
@@ -592,6 +612,10 @@ export function ListLocalDrafts() {
 
 export function ListLocalFolders() {
   return window['go']['main']['App']['ListLocalFolders']();
+}
+
+export function ListLocalLibraryClips(arg1) {
+  return window['go']['main']['App']['ListLocalLibraryClips'](arg1);
 }
 
 export function ListLocalLibraryCollectionGroups() {
@@ -792,6 +816,10 @@ export function ReorderFriends(arg1) {
 
 export function ReorderStoryPhotos(arg1, arg2) {
   return window['go']['main']['App']['ReorderStoryPhotos'](arg1, arg2);
+}
+
+export function ReportLocalAssetMediaMetadata(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['ReportLocalAssetMediaMetadata'](arg1, arg2, arg3, arg4);
 }
 
 export function RestoreLocalAsset(arg1) {
@@ -1028,6 +1056,10 @@ export function UpdateFriend(arg1, arg2) {
 
 export function UpdateLocalAsset(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['main']['App']['UpdateLocalAsset'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
+export function UpdateLocalAssetClip(arg1, arg2) {
+  return window['go']['main']['App']['UpdateLocalAssetClip'](arg1, arg2);
 }
 
 export function UpdateLocalLibraryCollection(arg1, arg2, arg3, arg4, arg5) {

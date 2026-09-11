@@ -261,14 +261,14 @@ func (s *store) writeIndexedFiles(ctx context.Context, files []indexedFile, fold
 	}
 	defer existingStatement.Close()
 	insertStatement, err := tx.PrepareContext(ctx, `INSERT INTO assets(
-            id,folder_id,relative_path,path_key,file_name,extension,format,mime_type,media_kind,byte_size,modified_at_ns,width,height,orientation,is_animated,frame_count,
+            id,folder_id,relative_path,path_key,file_name,extension,format,mime_type,media_kind,byte_size,modified_at_ns,duration_ms,width,height,orientation,is_animated,frame_count,
             availability,preview_status,preview_error,metadata_status,dominant_colors,captured_at,discovered_at,technical_updated_at,scan_token
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active',?,?,?,?,?,?,?,?)`)
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active',?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return nil, err
 	}
 	defer insertStatement.Close()
-	updateStatement, err := tx.PrepareContext(ctx, `UPDATE assets SET folder_id=?,relative_path=?,file_name=?,extension=?,format=?,mime_type=?,media_kind=?,byte_size=?,modified_at_ns=?,width=?,height=?,orientation=?,is_animated=?,frame_count=?,availability='active',preview_status=?,preview_error=?,metadata_status=?,dominant_colors=?,captured_at=?,technical_updated_at=?,scan_token=?,trash_entry_id=NULL WHERE id=?`)
+	updateStatement, err := tx.PrepareContext(ctx, `UPDATE assets SET folder_id=?,relative_path=?,file_name=?,extension=?,format=?,mime_type=?,media_kind=?,byte_size=?,modified_at_ns=?,duration_ms=?,width=?,height=?,orientation=?,is_animated=?,frame_count=?,availability='active',preview_status=?,preview_error=?,metadata_status=?,dominant_colors=?,captured_at=?,technical_updated_at=?,scan_token=?,trash_entry_id=NULL WHERE id=?`)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +297,7 @@ func (s *store) writeIndexedFiles(ctx context.Context, files []indexedFile, fold
 			created = true
 			if _, err := insertStatement.ExecContext(ctx,
 				existingID, folderID, file.RelativePath, file.PathKey, file.FileName, file.Extension, file.Format, file.MimeType, mediaKindOrDefault(file.MediaKind),
-				file.ByteSize, file.ModifiedAtNS, file.Width, file.Height, normalizedOrientation(file.Orientation), file.IsAnimated, file.FrameCount,
+				file.ByteSize, file.ModifiedAtNS, file.DurationMS, file.Width, file.Height, normalizedOrientation(file.Orientation), file.IsAnimated, file.FrameCount,
 				file.PreviewStatus, boundedError(file.PreviewError), file.MetadataStatus, encodeDominantColors(file.DominantColors), capturedAt, now, now, scanToken); err != nil {
 				return nil, err
 			}
@@ -311,7 +311,7 @@ func (s *store) writeIndexedFiles(ctx context.Context, files []indexedFile, fold
 				dominantColors = oldDominantColors
 			}
 			if _, err := updateStatement.ExecContext(ctx,
-				folderID, file.RelativePath, file.FileName, file.Extension, file.Format, file.MimeType, mediaKindOrDefault(file.MediaKind), file.ByteSize, file.ModifiedAtNS,
+				folderID, file.RelativePath, file.FileName, file.Extension, file.Format, file.MimeType, mediaKindOrDefault(file.MediaKind), file.ByteSize, file.ModifiedAtNS, file.DurationMS,
 				file.Width, file.Height, normalizedOrientation(file.Orientation), file.IsAnimated, file.FrameCount, previewStatus, previewError,
 				file.MetadataStatus, dominantColors, capturedAt, now, scanToken, existingID); err != nil {
 				return nil, err
@@ -326,7 +326,7 @@ func (s *store) writeIndexedFiles(ctx context.Context, files []indexedFile, fold
 		results = append(results, assetWriteResult{
 			ID:           AssetID(existingID),
 			Created:      created,
-			NeedsPreview: file.PreviewStatus == "pending" && !isRAWExtension(file.Extension),
+			NeedsPreview: file.PreviewStatus == "pending" && !isRAWExtension(file.Extension) && !isTimedMediaKind(file.MediaKind),
 			Format:       file.Format,
 			Extension:    file.Extension,
 		})
@@ -507,7 +507,7 @@ func (s *store) derivativeSources(ctx context.Context, ids []AssetID) (map[Asset
 		for _, id := range chunk {
 			args = append(args, id)
 		}
-		rows, err := s.db.QueryContext(ctx, `SELECT id,relative_path,mime_type,availability,modified_at_ns,byte_size,orientation,format,extension
+		rows, err := s.db.QueryContext(ctx, `SELECT id,relative_path,mime_type,availability,modified_at_ns,byte_size,orientation,format,extension,media_kind
 			FROM assets WHERE id IN (`+queryPlaceholders(len(chunk))+`)`, args...)
 		if err != nil {
 			return nil, err
@@ -515,7 +515,7 @@ func (s *store) derivativeSources(ctx context.Context, ids []AssetID) (map[Asset
 		for rows.Next() {
 			var id AssetID
 			var source derivativeSource
-			if err := rows.Scan(&id, &source.RelativePath, &source.MimeType, &source.Availability, &source.ModifiedAtNS, &source.ByteSize, &source.Orientation, &source.Format, &source.Extension); err != nil {
+			if err := rows.Scan(&id, &source.RelativePath, &source.MimeType, &source.Availability, &source.ModifiedAtNS, &source.ByteSize, &source.Orientation, &source.Format, &source.Extension, &source.MediaKind); err != nil {
 				rows.Close()
 				return nil, err
 			}

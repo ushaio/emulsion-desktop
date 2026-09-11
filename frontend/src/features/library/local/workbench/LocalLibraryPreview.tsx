@@ -1,8 +1,9 @@
 import { FileText } from 'lucide-react'
 import { PhotoPreviewFrame } from '@/components/admin/PhotoPreviewFrame'
-import { isPhotoAsset } from '../types'
-import type { LocalAsset } from '../types'
+import { isPhotoAsset, isPlayableAsset } from '../types'
+import type { LocalAsset, LocalAssetClip } from '../types'
 import type { LocalLibraryCopy } from '../copy'
+import { MediaPlayerFrame } from './MediaPlayerFrame'
 
 interface Props {
   asset: LocalAsset
@@ -13,6 +14,9 @@ interface Props {
   onNext?: () => void
   hasPrevious?: boolean
   hasNext?: boolean
+  /** When set, the player opens playing just this clip's range. */
+  initialClip?: { startMs: number, endMs: number, title?: string } | null
+  onClipsChanged?: (assetId: string, clips: LocalAssetClip[]) => void
 }
 
 function formatBytes(value: number) {
@@ -22,8 +26,25 @@ function formatBytes(value: number) {
   return `${(value / 1024 ** 3).toFixed(2)} GB`
 }
 
-export function LocalLibraryPreview({ asset, copy, onClose, onPrevious, onNext, hasPrevious = false, hasNext = false }: Props) {
+export function LocalLibraryPreview({ asset, copy, onClose, onOpenSystem, onPrevious, onNext, hasPrevious = false, hasNext = false, initialClip = null, onClipsChanged }: Props) {
   const isPhoto = isPhotoAsset(asset)
+
+  if (isPlayableAsset(asset)) {
+    return <MediaPlayerFrame
+      key={asset.id}
+      target={asset}
+      copy={copy}
+      initialClip={initialClip}
+      onClose={onClose}
+      onOpenSystem={() => onOpenSystem(asset)}
+      onPrevious={onPrevious}
+      onNext={onNext}
+      hasPrevious={hasPrevious}
+      hasNext={hasNext}
+      onClipsChanged={(clips) => onClipsChanged?.(asset.id, clips)}
+    />
+  }
+
   const previewPending = asset.previewStatus === 'pending' || asset.previewStatus === 'generating'
   const rawFormats = new Set(['cr2', 'cr3', 'nef', 'arw', 'dng', 'raf', 'rw2', 'orf', 'srw', 'pef'])
   const isRaw = rawFormats.has(asset.format.toLowerCase())

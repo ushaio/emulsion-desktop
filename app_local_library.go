@@ -65,6 +65,10 @@ func (a *App) SelectLocalLibraryImportFiles() ([]string, error) {
 				DisplayName: "照片资源 (*.jpg;*.jpeg;*.png;*.webp;*.gif;*.avif;*.heic;*.heif;*.tif;*.tiff;*.cr2;*.cr3;*.nef;*.arw;*.dng;*.raf;*.rw2)",
 				Pattern:     "*.jpg;*.jpeg;*.png;*.webp;*.gif;*.avif;*.heic;*.heif;*.tif;*.tiff;*.cr2;*.cr3;*.nef;*.arw;*.dng;*.raf;*.rw2",
 			},
+			{
+				DisplayName: "视频/音频 (*.mp4;*.mov;*.mp3;*.m4a;*.aac;*.wav;*.flac;*.ogg)",
+				Pattern:     "*.mp4;*.mov;*.mp3;*.m4a;*.aac;*.wav;*.flac;*.ogg",
+			},
 			{DisplayName: "所有文件 (*.*)", Pattern: "*.*"},
 		},
 	})
@@ -460,4 +464,63 @@ func (a *App) OpenLocalLibraryFolderInFileManager(relative string) error {
 		return err
 	}
 	return exec.Command("explorer.exe", path).Start()
+}
+
+// ─── Local Library Clips (logical media segments) ───────────
+
+func (a *App) ListLocalAssetClips(assetID string) ([]local_library.AssetClipDTO, error) {
+	return a.LocalLibrary.ListAssetClips(local_library.AssetID(assetID))
+}
+
+func (a *App) CreateLocalAssetClip(input local_library.CreateAssetClipInput) (local_library.AssetClipDTO, error) {
+	return a.LocalLibrary.CreateAssetClip(input)
+}
+
+func (a *App) UpdateLocalAssetClip(id string, patch local_library.UpdateAssetClipPatch) (local_library.AssetClipDTO, error) {
+	return a.LocalLibrary.UpdateAssetClip(local_library.AssetID(id), patch)
+}
+
+func (a *App) DeleteLocalAssetClip(id string) error {
+	return a.LocalLibrary.DeleteAssetClip(local_library.AssetID(id))
+}
+
+func (a *App) ListLocalLibraryClips(query local_library.ClipListQuery) (local_library.ClipPage, error) {
+	return a.LocalLibrary.ListLibraryClips(query)
+}
+
+// ReportLocalAssetMediaMetadata backfills duration/dimensions observed by the
+// frontend player (loadedmetadata) for media whose duration Go cannot parse.
+func (a *App) ReportLocalAssetMediaMetadata(id string, durationMS int64, width, height int) error {
+	return a.LocalLibrary.ReportAssetMediaMetadata(local_library.AssetID(id), durationMS, width, height)
+}
+
+func (a *App) DetectLocalLibraryFFmpeg() (string, error) {
+	return local_library.DetectFFmpeg(), nil
+}
+
+// ExportLocalAssetClip asks for a destination, then cuts the clip with the
+// system ffmpeg in the background. Progress and the final result arrive on
+// the "local-library:clip-export" Wails event; the return value only reports
+// whether the export started (or the save dialog was cancelled).
+func (a *App) ExportLocalAssetClip(clipID string) (local_library.ClipExportProgress, error) {
+	plan, err := a.LocalLibrary.PrepareClipExport(local_library.AssetID(clipID))
+	if err != nil {
+		return local_library.ClipExportProgress{}, err
+	}
+	destination, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "导出片段",
+		DefaultFilename: plan.SuggestedName,
+	})
+	if err != nil {
+		return local_library.ClipExportProgress{}, err
+	}
+	if destination == "" {
+		return local_library.ClipExportProgress{ClipID: local_library.AssetID(clipID), State: "cancelled"}, nil
+	}
+	go func() {
+		_ = a.LocalLibrary.ExportClipToPath(local_library.AssetID(clipID), destination, func(progress local_library.ClipExportProgress) {
+			runtime.EventsEmit(a.ctx, "local-library:clip-export", progress)
+		})
+	}()
+	return local_library.ClipExportProgress{ClipID: local_library.AssetID(clipID), State: "started"}, nil
 }
