@@ -85,6 +85,8 @@ export const localLibraryCopy = {
       loopSelection: '循环播放选区', playClip: '播放', openSource: '打开源文件',
       markInFirst: '请先标记起点和终点', clipTooShort: '片段时长过短', clipOutOfRange: '片段超出媒体时长', clipCreateFailed: '片段创建失败',
       audioAsset: '音频', videoAsset: '视频', ffmpegMissingTitle: '未检测到 ffmpeg', ffmpegMissingBody: '导出片段需要系统 ffmpeg。请安装 ffmpeg 并确保它在 PATH 中，然后重试。',
+      frameBack: '上一帧 (,)', frameForward: '下一帧 (.)',
+      zoomIn: '放大时间轴（滚轮）', zoomOut: '缩小时间轴（滚轮）', fitTimeline: '重置缩放（双击时间轴）',
     },
   },
   en: {
@@ -172,6 +174,8 @@ export const localLibraryCopy = {
       loopSelection: 'Loop selection', playClip: 'Play', openSource: 'Open source',
       markInFirst: 'Mark an in and out point first', clipTooShort: 'The clip is too short', clipOutOfRange: 'The clip exceeds the media duration', clipCreateFailed: 'Could not create the clip',
       audioAsset: 'Audio', videoAsset: 'Video', ffmpegMissingTitle: 'ffmpeg not found', ffmpegMissingBody: 'Exporting clips requires a system ffmpeg. Install it and make sure it is on the PATH, then try again.',
+      frameBack: 'Previous frame (,)', frameForward: 'Next frame (.)',
+      zoomIn: 'Zoom in (wheel)', zoomOut: 'Zoom out (wheel)', fitTimeline: 'Reset zoom (double-click)',
     },
   },
 } as const
