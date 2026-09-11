@@ -51,6 +51,7 @@ type derivativeSource struct {
 	Format       string
 	Extension    string
 	MediaKind    string
+	DurationMS   int64
 }
 
 type derivativeRequest struct {
@@ -430,7 +431,8 @@ func isHexString(value string) bool {
 }
 
 func (m *Manager) queueThumbnail(session *librarySession, id AssetID) {
-	if source, err := session.store.derivativeSource(session.ctx, id); err != nil || isRAWFormat(source.Format) || isRAWExtension(source.Extension) || isTimedMediaKind(source.MediaKind) {
+	if source, err := session.store.derivativeSource(session.ctx, id); err != nil || isRAWFormat(source.Format) || isRAWExtension(source.Extension) ||
+		(isTimedMediaKind(source.MediaKind) && (source.MediaKind != "video" || ResolveFFmpeg() == "")) {
 		return
 	}
 	_, _ = m.requestDerivative(session.ctx, session, id, derivativeThumbnail, derivativePriorityBackground, false)
@@ -439,7 +441,12 @@ func (m *Manager) queueThumbnail(session *librarySession, id AssetID) {
 // queueThumbnailCandidate skips the asset lookup when the caller already knows
 // the format, which is the case for every asset the scan just indexed.
 func (m *Manager) queueThumbnailCandidate(session *librarySession, candidate thumbnailCandidate) {
-	if isRAWFormat(candidate.Format) || isRAWExtension(candidate.Extension) || isVideoExtension(candidate.Extension) || isAudioExtension(candidate.Extension) {
+	if isRAWFormat(candidate.Format) || isRAWExtension(candidate.Extension) || isAudioExtension(candidate.Extension) {
+		return
+	}
+	// Video posters are Go-rendered through ffmpeg; without one the frontend
+	// fallback only covers files it can safely decode, so nothing is queued.
+	if isVideoExtension(candidate.Extension) && ResolveFFmpeg() == "" {
 		return
 	}
 	_, _ = m.requestDerivative(session.ctx, session, candidate.ID, derivativeThumbnail, derivativePriorityBackground, false)
@@ -537,12 +544,49 @@ func (m *Manager) generateDerivative(ctx context.Context, session *librarySessio
 		}
 	}
 
-	// Playable media has no Go-side renderer: its grid thumbnail is a
-	// frontend-captured poster. When no poster has been committed yet, report
-	// "unavailable" without recording a failure so the pending state survives
-	// until the frontend uploads the frame.
+	// Playable media: with a usable ffmpeg the poster frame is extracted by
+	// the bundled binary right here, keeping video decode out of the WebView.
+	// Audio has no poster at all, and without ffmpeg the thumbnail stays
+	// pending so the frontend canvas fallback can pick it up (small H.264
+	// only; the renderer cannot survive mass HEVC decoding).
 	if isTimedMediaKind(request.source.MediaKind) {
-		result.status = "unavailable"
+		if request.variant != derivativeThumbnail || request.source.MediaKind != "video" || ResolveFFmpeg() == "" {
+			result.status = "unavailable"
+			return result
+		}
+		// An orphaned poster from an interrupted run is adopted without
+		// spawning ffmpeg again.
+		if adopted, ok := adoptDerivativeFile(destination, dimension, request.variant); ok {
+			m.recordDerivativeSuccess(session, request, destination, previousCacheKey, adopted)
+			result.path, result.mime, result.status = destination, "image/jpeg", "ready"
+			return result
+		}
+		_ = os.Remove(destination)
+		sourcePath, resolveErr := resolveWithinRoot(session.root, request.source.RelativePath)
+		if resolveErr != nil {
+			result.err = resolveErr
+			m.recordDerivativeFailure(session, request, resolveErr)
+			return result
+		}
+		sourceInfo, statErr := os.Stat(sourcePath)
+		if statErr != nil || sourceInfo.Size() != request.source.ByteSize || sourceInfo.ModTime().UnixNano() != request.source.ModifiedAtNS {
+			result.err = errDerivativeSourceChanged
+			return result
+		}
+		if renderErr := renderVideoPosterWithFFmpeg(ctx, ResolveFFmpeg(), sourcePath, destination, request.source.DurationMS); renderErr != nil {
+			result.err = renderErr
+			m.recordDerivativeFailure(session, request, renderErr)
+			return result
+		}
+		width, height, byteSize, inspectErr := inspectPosterFile(destination)
+		if inspectErr != nil {
+			_ = os.Remove(destination)
+			result.err = inspectErr
+			m.recordDerivativeFailure(session, request, inspectErr)
+			return result
+		}
+		m.recordDerivativeSuccess(session, request, destination, previousCacheKey, derivativeRender{Width: width, Height: height, ByteSize: byteSize})
+		result.path, result.mime, result.status = destination, "image/jpeg", "ready"
 		return result
 	}
 

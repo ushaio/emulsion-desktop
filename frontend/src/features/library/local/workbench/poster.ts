@@ -1,18 +1,37 @@
 import type { LocalAsset } from '../types'
 import { isVideoAsset } from '../types'
+import { localLibraryApi } from '../api'
 
-// Go cannot decode video frames, so video thumbnails are captured by the
-// frontend: one frame is drawn to a canvas and POSTed to the local library
-// asset server, which stores it as the regular grid thumbnail.
+// Video posters are normally rendered by the Go side through the bundled
+// ffmpeg (see local_library/poster.go): video decode must stay out of the
+// WebView, whose renderer process crashes on mass HEVC/4K decoding. This
+// canvas capture is the fallback for installs without a usable ffmpeg, and it
+// only ever handles files the WebView can decode safely — small H.264.
 
 /** The subset of an asset needed to capture and upload a poster frame. */
 export type PosterTarget = Pick<LocalAsset, 'id' | 'originalUrl' | 'previewStatus' | 'mediaKind' | 'format' | 'modifiedAtNs' | 'byteSize'>
 
 const POSTER_MAX_DIMENSION = 512
 const POSTER_JPEG_QUALITY = 0.85
+// The WebView must not decode huge drone footage just for a thumbnail; those
+// files get their poster from ffmpeg or not at all.
+const POSTER_FRONTEND_MAX_BYTES = 500 * 1024 * 1024
 // Decoding several large videos at once starves the WebView media pipeline;
 // a small queue keeps grid warm-up polite.
 const POSTER_CAPTURE_CONCURRENCY = 2
+
+// Resolved once per session: when the backend has ffmpeg it owns all poster
+// generation, and the frontend never decodes video for thumbnails again.
+let frontendCaptureAllowed: Promise<boolean> | null = null
+function shouldCaptureInFrontend(): Promise<boolean> {
+  if (!frontendCaptureAllowed) {
+    frontendCaptureAllowed = localLibraryApi.detectFFmpeg()
+      .then((path) => !path)
+      // A failed probe must not disable the fallback.
+      .catch(() => true)
+  }
+  return frontendCaptureAllowed
+}
 
 let activeCaptures = 0
 const captureQueue: Array<() => void> = []
@@ -72,6 +91,10 @@ function capturePosterFrame(video: HTMLVideoElement): Promise<Blob | null> {
  */
 export async function captureAndUploadVideoPoster(asset: PosterTarget): Promise<boolean> {
   if (!isVideoAsset(asset) || asset.previewStatus !== 'pending' || !asset.originalUrl) return false
+  // ffmpeg on the backend renders every poster; oversized files are left for
+  // it rather than risk the renderer on them.
+  if (asset.byteSize > POSTER_FRONTEND_MAX_BYTES) return false
+  if (!(await shouldCaptureInFrontend())) return false
   const key = `${asset.id}:${asset.modifiedAtNs}:${asset.byteSize}`
   if (attemptedPosterKeys.has(key)) return false
   attemptedPosterKeys.add(key)
@@ -79,7 +102,9 @@ export async function captureAndUploadVideoPoster(asset: PosterTarget): Promise<
   const release = await acquireCaptureSlot()
   const video = document.createElement('video')
   video.muted = true
-  video.preload = 'auto'
+  // metadata is enough: the seek below pulls the exact range it needs, while
+  // auto would eagerly buffer and decode the whole file.
+  video.preload = 'metadata'
   video.src = asset.originalUrl
   try {
     await new Promise<void>((resolve, reject) => {

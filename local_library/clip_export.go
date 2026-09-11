@@ -9,33 +9,81 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
-// Clip export runs the system ffmpeg with stream copy so a segment is cut
-// losslessly in roughly the time it takes to read the source range. The
-// application deliberately does not bundle ffmpeg: when none is installed,
-// export is disabled and the library keeps working (playback and logical
-// clips never need it).
+// Clip export runs ffmpeg with stream copy so a segment is cut losslessly in
+// roughly the time it takes to read the source range. The binary is bundled
+// next to the application executable by the installer; a system ffmpeg on the
+// PATH or the MO_GALLERY_FFMPEG override are also accepted. When none is
+// usable, export is disabled and the library keeps working (playback and
+// logical clips never need it).
 
-// DetectFFmpeg returns the absolute path of a usable system ffmpeg binary, or
-// an empty string when none is available.
-func DetectFFmpeg() string {
-	path, err := exec.LookPath("ffmpeg")
-	if err != nil || path == "" {
-		return ""
+// ffmpegCandidates lists the ffmpeg binaries probed by ResolveFFmpeg, in
+// priority order: the explicit MO_GALLERY_FFMPEG override (development and
+// exotic setups), then the binary bundled next to the application executable
+// by the installers. The sidecar is named emulsion-ffmpeg so it never
+// collides with a system ffmpeg, which is looked up on the PATH afterwards.
+func ffmpegCandidates() []string {
+	candidates := make([]string, 0, 2)
+	if override := strings.TrimSpace(os.Getenv("MO_GALLERY_FFMPEG")); override != "" {
+		candidates = append(candidates, override)
 	}
+	if exe, err := os.Executable(); err == nil {
+		name := "emulsion-ffmpeg"
+		if runtime.GOOS == "windows" {
+			name = "emulsion-ffmpeg.exe"
+		}
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), name))
+	}
+	return candidates
+}
+
+func ffmpegAnswersVersion(binary string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := exec.CommandContext(ctx, path, "-hide_banner", "-version").Run(); err != nil {
-		return ""
+	return exec.CommandContext(ctx, binary, "-hide_banner", "-version").Run() == nil
+}
+
+var (
+	ffmpegResolveOnce sync.Once
+	ffmpegResolved    string
+)
+
+// ResolveFFmpeg returns the absolute path of a usable ffmpeg binary, or an
+// empty string when none is. The lookup runs once per process: candidates are
+// probed in order (override, bundled sidecar, system PATH) and each must
+// answer -version, so a broken or blocked binary falls through to the next.
+func ResolveFFmpeg() string {
+	ffmpegResolveOnce.Do(func() { ffmpegResolved = resolveFFmpeg() })
+	return ffmpegResolved
+}
+
+func resolveFFmpeg() string {
+	candidates := ffmpegCandidates()
+	if path, err := exec.LookPath("ffmpeg"); err == nil && path != "" {
+		candidates = append(candidates, path)
 	}
-	if resolved, absErr := filepath.Abs(path); absErr == nil {
-		return resolved
+	for _, candidate := range candidates {
+		if !ffmpegAnswersVersion(candidate) {
+			continue
+		}
+		if resolved, absErr := filepath.Abs(candidate); absErr == nil {
+			return resolved
+		}
+		return candidate
 	}
-	return path
+	return ""
+}
+
+// DetectFFmpeg returns the absolute path of a usable ffmpeg binary, or an
+// empty string when none is available.
+func DetectFFmpeg() string {
+	return ResolveFFmpeg()
 }
 
 var unsafeFileNamePattern = regexp.MustCompile("[<>:\"/\\\\|?*\\x00-\\x1f]")
@@ -104,7 +152,7 @@ func (m *Manager) PrepareClipExport(clipID AssetID) (ClipExportPlan, error) {
 func (m *Manager) ExportClipToPath(clipID AssetID, destination string, progress func(ClipExportProgress)) error {
 	ffmpeg := DetectFFmpeg()
 	if ffmpeg == "" {
-		return newError(ErrFFmpegUnavailable, "未检测到系统 ffmpeg，无法导出片段", nil)
+		return newError(ErrFFmpegUnavailable, "未检测到可用的 ffmpeg，无法导出片段", nil)
 	}
 	session, err := m.requireAvailableSession()
 	if err != nil {

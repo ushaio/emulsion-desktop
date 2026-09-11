@@ -507,7 +507,7 @@ func (s *store) derivativeSources(ctx context.Context, ids []AssetID) (map[Asset
 		for _, id := range chunk {
 			args = append(args, id)
 		}
-		rows, err := s.db.QueryContext(ctx, `SELECT id,relative_path,mime_type,availability,modified_at_ns,byte_size,orientation,format,extension,media_kind
+		rows, err := s.db.QueryContext(ctx, `SELECT id,relative_path,mime_type,availability,modified_at_ns,byte_size,orientation,format,extension,media_kind,duration_ms
 			FROM assets WHERE id IN (`+queryPlaceholders(len(chunk))+`)`, args...)
 		if err != nil {
 			return nil, err
@@ -515,7 +515,7 @@ func (s *store) derivativeSources(ctx context.Context, ids []AssetID) (map[Asset
 		for rows.Next() {
 			var id AssetID
 			var source derivativeSource
-			if err := rows.Scan(&id, &source.RelativePath, &source.MimeType, &source.Availability, &source.ModifiedAtNS, &source.ByteSize, &source.Orientation, &source.Format, &source.Extension, &source.MediaKind); err != nil {
+			if err := rows.Scan(&id, &source.RelativePath, &source.MimeType, &source.Availability, &source.ModifiedAtNS, &source.ByteSize, &source.Orientation, &source.Format, &source.Extension, &source.MediaKind, &source.DurationMS); err != nil {
 				rows.Close()
 				return nil, err
 			}

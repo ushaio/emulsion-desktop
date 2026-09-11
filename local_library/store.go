@@ -1418,8 +1418,8 @@ type derivativeRecord struct {
 }
 
 func (s *store) derivativeSource(ctx context.Context, id AssetID) (source derivativeSource, err error) {
-	err = s.db.QueryRowContext(ctx, `SELECT relative_path,mime_type,availability,modified_at_ns,byte_size,orientation,format,extension,media_kind FROM assets WHERE id=?`, id).
-		Scan(&source.RelativePath, &source.MimeType, &source.Availability, &source.ModifiedAtNS, &source.ByteSize, &source.Orientation, &source.Format, &source.Extension, &source.MediaKind)
+	err = s.db.QueryRowContext(ctx, `SELECT relative_path,mime_type,availability,modified_at_ns,byte_size,orientation,format,extension,media_kind,duration_ms FROM assets WHERE id=?`, id).
+		Scan(&source.RelativePath, &source.MimeType, &source.Availability, &source.ModifiedAtNS, &source.ByteSize, &source.Orientation, &source.Format, &source.Extension, &source.MediaKind, &source.DurationMS)
 	if err == sql.ErrNoRows {
 		err = newError(ErrAssetNotFound, "asset does not exist", map[string]any{"assetId": id})
 	}

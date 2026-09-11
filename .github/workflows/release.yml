@@ -113,10 +113,92 @@ jobs:
           path: build/runtime-package
           if-no-files-found: error
 
+  # Bundled media component: a minimal LGPL ffmpeg (demux/copy for clip
+  # export, H.264/HEVC decode + scale + mjpeg encode for video posters). The
+  # binary is renamed emulsion-ffmpeg so it never collides with a system
+  # ffmpeg; the app resolves override > bundled sidecar > PATH.
+  ffmpeg-bundle:
+    needs:
+      - prepare
+    if: needs.prepare.outputs.tag_exists == 'false'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows
+            arch: amd64
+            runner: ubuntu-24.04
+          - os: linux
+            arch: amd64
+            runner: ubuntu-24.04
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+          - os: darwin
+            arch: amd64
+            runner: macos-15-intel
+          - os: darwin
+            arch: arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Install mingw cross toolchain (Windows target)
+        if: matrix.os == 'windows'
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64
+
+      - name: Download ffmpeg source
+        run: |
+          curl -fL https://ffmpeg.org/releases/ffmpeg-7.1.1.tar.xz -o ffmpeg.tar.xz
+          tar -xf ffmpeg.tar.xz
+
+      - name: Configure minimal LGPL build
+        working-directory: ffmpeg-7.1.1
+        run: |
+          CROSS_ARGS=""
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            CROSS_ARGS="--target-os=mingw32 --arch=x86_64 --cross-prefix=x86_64-w64-mingw32-"
+          fi
+          ./configure \
+            --prefix="$PWD/stage" \
+            $CROSS_ARGS \
+            --disable-everything --disable-autodetect --disable-doc --disable-debug \
+            --disable-network --disable-iconv --disable-ffplay --disable-ffprobe \
+            --disable-x86asm --enable-small \
+            --enable-protocol=file,pipe \
+            --enable-demuxer=mov,mp3,wav,flac,ogg \
+            --enable-muxer=mp4,mov,mp3,wav,flac,ogg,adts,image2 \
+            --enable-decoder=h264,hevc \
+            --enable-parser=h264,hevc \
+            --enable-encoder=mjpeg \
+            --enable-filter=scale
+
+      - name: Build
+        working-directory: ffmpeg-7.1.1
+        run: |
+          make -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
+          make install
+
+      - name: Stage
+        run: |
+          mkdir -p ffmpeg-stage
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            cp ffmpeg-7.1.1/stage/bin/ffmpeg.exe ffmpeg-stage/emulsion-ffmpeg.exe
+          else
+            cp ffmpeg-7.1.1/stage/bin/ffmpeg ffmpeg-stage/emulsion-ffmpeg
+          fi
+
+      - name: Upload bundled ffmpeg
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulsion-ffmpeg-${{ matrix.os }}-${{ matrix.arch }}
+          path: ffmpeg-stage
+          if-no-files-found: error
+
   desktop-windows-build:
     needs:
       - prepare
       - node-runtime
+      - ffmpeg-bundle
     if: needs.prepare.outputs.tag_exists == 'false'
     strategy:
       fail-fast: false
@@ -179,6 +261,18 @@ jobs:
           name: mo-gallery-node-runtime-${{ needs.prepare.outputs.tag }}
           path: build/runtime-package
 
+      - name: Download bundled ffmpeg
+        uses: actions/download-artifact@v4
+        with:
+          name: emulsion-ffmpeg-windows-amd64
+          path: ffmpeg-pkg
+
+      - name: Stage bundled ffmpeg next to the app binary
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path 'build/bin' -Force | Out-Null
+          Copy-Item 'ffmpeg-pkg/emulsion-ffmpeg.exe' 'build/bin/emulsion-ffmpeg.exe'
+
       - name: Install runtime bundle and trust keys
         shell: pwsh
         run: |
@@ -216,7 +310,10 @@ jobs:
 
       - name: Build portable executable and NSIS installer
         shell: pwsh
-        run: wails build -clean -nsis -platform ${{ matrix.platform }} -ldflags "-X mo-gallery-desktop/storage_plugins.BundledNodeRuntimePublicKey=$env:NODE_RUNTIME_PUBLIC_KEY -X mo-gallery-desktop/storage_plugins.BundledPluginSigningPublicKey=$env:PLUGIN_SIGNING_PUBLIC_KEY"
+        # -clean is omitted: it wipes build/bin and would delete the staged
+        # emulsion-ffmpeg.exe the NSIS template packages. A fresh CI checkout
+        # has no build/bin to clean.
+        run: wails build -nsis -platform ${{ matrix.platform }} -ldflags "-X mo-gallery-desktop/storage_plugins.BundledNodeRuntimePublicKey=$env:NODE_RUNTIME_PUBLIC_KEY -X mo-gallery-desktop/storage_plugins.BundledPluginSigningPublicKey=$env:PLUGIN_SIGNING_PUBLIC_KEY"
 
       - name: Normalize Windows artifact names
         shell: pwsh
@@ -225,9 +322,12 @@ jobs:
           New-Item -ItemType Directory -Path $destination -Force | Out-Null
 
           $installer = Get-ChildItem 'build/bin' -File -Filter '*-installer.exe' | Select-Object -First 1
-          $portable = Get-ChildItem 'build/bin' -File -Filter '*.exe' |
-            Where-Object { -not $installer -or $_.FullName -ne $installer.FullName } |
-            Select-Object -First 1
+          $portable = Get-Item 'build/bin/emulsion.exe' -ErrorAction SilentlyContinue
+          if (-not $portable) {
+            $portable = Get-ChildItem 'build/bin' -File -Filter '*.exe' |
+              Where-Object { $_.Name -notin @('emulsion-ffmpeg.exe') -and (-not $installer -or $_.FullName -ne $installer.FullName) } |
+              Select-Object -First 1
+          }
 
           if (-not $portable -or -not $installer) {
             Get-ChildItem 'build/bin' -Recurse | Select-Object FullName
@@ -235,7 +335,9 @@ jobs:
           }
 
           $baseName = 'emulsion-${{ needs.prepare.outputs.version }}-windows-${{ matrix.arch }}'
-          Copy-Item $portable.FullName (Join-Path $destination "$baseName-portable.exe")
+          # The portable build ships as a zip so the bundled emulsion-ffmpeg
+          # media component travels with the executable.
+          Compress-Archive -Path $portable.FullName, 'build/bin/emulsion-ffmpeg.exe' -DestinationPath (Join-Path $destination "$baseName-portable.zip")
           Copy-Item $installer.FullName (Join-Path $destination "$baseName-setup.exe")
 
       - name: Upload Windows artifacts
@@ -249,6 +351,7 @@ jobs:
     needs:
       - prepare
       - node-runtime
+      - ffmpeg-bundle
     if: needs.prepare.outputs.tag_exists == 'false'
     strategy:
       fail-fast: false
@@ -341,8 +444,36 @@ jobs:
           security default-keychain -s "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple: -s -k "$MACOS_CERTIFICATE_PASSWORD" "$KEYCHAIN_PATH"
 
+      - name: Download bundled ffmpeg (single arch)
+        if: matrix.arch != 'universal'
+        uses: actions/download-artifact@v4
+        with:
+          name: emulsion-ffmpeg-darwin-${{ matrix.arch }}
+          path: ffmpeg-pkg
+
+      - name: Download bundled ffmpeg (universal)
+        if: matrix.arch == 'universal'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: emulsion-ffmpeg-darwin-*
+          path: ffmpeg-pkg
+
       - name: Build macOS application
         run: wails build -clean -platform ${{ matrix.platform }} -ldflags "-X mo-gallery-desktop/storage_plugins.BundledNodeRuntimePublicKey=$NODE_RUNTIME_PUBLIC_KEY -X mo-gallery-desktop/storage_plugins.BundledPluginSigningPublicKey=$PLUGIN_SIGNING_PUBLIC_KEY"
+
+      - name: Install bundled ffmpeg into the app bundle
+        # Must run after the build (which recreates the bundle) and before
+        # codesign so the component is covered by the signature.
+        run: |
+          DEST='build/bin/emulsion.app/Contents/MacOS'
+          if [ '${{ matrix.arch }}' = 'universal' ]; then
+            lipo -create -output "$DEST/emulsion-ffmpeg" \
+              ffmpeg-pkg/emulsion-ffmpeg-darwin-amd64/emulsion-ffmpeg \
+              ffmpeg-pkg/emulsion-ffmpeg-darwin-arm64/emulsion-ffmpeg
+          else
+            cp ffmpeg-pkg/emulsion-ffmpeg "$DEST/emulsion-ffmpeg"
+          fi
+          chmod +x "$DEST/emulsion-ffmpeg"
 
       - name: Sign macOS application
         if: ${{ env.MACOS_SIGNING_IDENTITY != '' && env.MACOS_CERTIFICATE_P12_BASE64 != '' }}
@@ -409,6 +540,7 @@ jobs:
     needs:
       - prepare
       - node-runtime
+      - ffmpeg-bundle
     if: needs.prepare.outputs.tag_exists == 'false'
     strategy:
       fail-fast: false
@@ -487,6 +619,12 @@ jobs:
           echo "NODE_RUNTIME_PUBLIC_KEY=$(tr -d '\r\n' < build/runtime-package/node-runtime-public-key.b64)" >> "$GITHUB_ENV"
           echo "PLUGIN_SIGNING_PUBLIC_KEY=$(tr -d '\r\n' < build/runtime-package/plugin-signing-public-key.b64)" >> "$GITHUB_ENV"
 
+      - name: Download bundled ffmpeg
+        uses: actions/download-artifact@v4
+        with:
+          name: emulsion-ffmpeg-linux-${{ matrix.arch }}
+          path: ffmpeg-pkg
+
       - name: Build Linux application
         run: wails build -clean -platform ${{ matrix.platform }} -tags webkit2_41 -ldflags "-X mo-gallery-desktop/storage_plugins.BundledNodeRuntimePublicKey=$NODE_RUNTIME_PUBLIC_KEY -X mo-gallery-desktop/storage_plugins.BundledPluginSigningPublicKey=$PLUGIN_SIGNING_PUBLIC_KEY"
 
@@ -499,6 +637,7 @@ jobs:
           fi
           mkdir -p release-assets/package
           install -m 0755 "$BINARY_PATH" release-assets/package/emulsion
+          install -m 0755 ffmpeg-pkg/emulsion-ffmpeg release-assets/package/emulsion-ffmpeg
           tar -C release-assets/package -czf \
             "release-assets/emulsion-${{ needs.prepare.outputs.version }}-linux-${{ matrix.arch }}.tar.gz" \
             emulsion
@@ -510,6 +649,7 @@ jobs:
           DEB_ROOT="release-assets/deb-root"
           mkdir -p "$DEB_ROOT/usr/bin" "$DEB_ROOT/usr/share/applications" "$DEB_ROOT/usr/share/icons/hicolor/512x512/apps" "$DEB_ROOT/DEBIAN"
           install -m 0755 "$BINARY_PATH" "$DEB_ROOT/usr/bin/emulsion"
+          install -m 0755 ffmpeg-pkg/emulsion-ffmpeg "$DEB_ROOT/usr/bin/emulsion-ffmpeg"
           install -m 0644 build/appicon.png "$DEB_ROOT/usr/share/icons/hicolor/512x512/apps/emulsion.png"
           cat > "$DEB_ROOT/usr/share/applications/emulsion.desktop" <<'DESKTOP'
           [Desktop Entry]
@@ -536,6 +676,7 @@ jobs:
           mkdir -p "$RPM_TOP/BUILD" "$RPM_TOP/RPMS/$RPM_ARCH" "$RPM_TOP/SOURCES" "$RPM_TOP/SPECS" "$RPM_TOP/SRPMS"
           mkdir -p release-assets/rpm-root/usr/bin release-assets/rpm-root/usr/share/applications release-assets/rpm-root/usr/share/icons/hicolor/512x512/apps
           install -m 0755 "$BINARY_PATH" release-assets/rpm-root/usr/bin/emulsion
+          install -m 0755 ffmpeg-pkg/emulsion-ffmpeg release-assets/rpm-root/usr/bin/emulsion-ffmpeg
           install -m 0644 build/appicon.png release-assets/rpm-root/usr/share/icons/hicolor/512x512/apps/emulsion.png
           cp "$DEB_ROOT/usr/share/applications/emulsion.desktop" release-assets/rpm-root/usr/share/applications/
           tar -C release-assets -czf "$RPM_TOP/SOURCES/emulsion.tar.gz" rpm-root
@@ -558,6 +699,7 @@ jobs:
           cp -a usr %{buildroot}/
           %files
           /usr/bin/emulsion
+          /usr/bin/emulsion-ffmpeg
           /usr/share/applications/emulsion.desktop
           /usr/share/icons/hicolor/512x512/apps/emulsion.png
           SPEC
@@ -567,6 +709,7 @@ jobs:
           APPDIR="$PWD/release-assets/emulsion.AppDir"
           mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/512x512/apps"
           install -m 0755 "$BINARY_PATH" "$APPDIR/usr/bin/emulsion"
+          install -m 0755 ffmpeg-pkg/emulsion-ffmpeg "$APPDIR/usr/bin/emulsion-ffmpeg"
           install -m 0644 build/appicon.png "$APPDIR/emulsion.png"
           install -m 0644 build/appicon.png "$APPDIR/usr/share/icons/hicolor/512x512/apps/emulsion.png"
           install -m 0644 "$DEB_ROOT/usr/share/applications/emulsion.desktop" "$APPDIR/emulsion.desktop"
@@ -622,7 +765,7 @@ jobs:
       - name: Verify release assets
         run: |
           expected_assets=(
-            "emulsion-${{ needs.prepare.outputs.version }}-windows-amd64-portable.exe"
+            "emulsion-${{ needs.prepare.outputs.version }}-windows-amd64-portable.zip"
             "emulsion-${{ needs.prepare.outputs.version }}-windows-amd64-setup.exe"
             "emulsion-${{ needs.prepare.outputs.version }}-macos-amd64.zip"
             "emulsion-${{ needs.prepare.outputs.version }}-macos-amd64.dmg"
