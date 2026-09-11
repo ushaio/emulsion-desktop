@@ -11,6 +11,7 @@ import { CloudLibrary } from '@/features/library/cloud/CloudLibrary'
 import { LocalLibrary } from '@/features/library/local/LocalLibrary'
 import type { LocalAsset } from '@/features/library/local/types'
 import type { Photo } from '@/types'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 
 export type LibrarySource = 'cloud' | 'local-library'
@@ -138,9 +139,9 @@ export function PhotoLibraryDialog(props: PhotoLibraryDialogProps) {
           aria-label={title}
           initial={{ opacity: 0, scale: 0.97, y: 8 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
-          className="pointer-events-auto flex h-[min(90vh,900px)] w-[min(96vw,1400px)] flex-col overflow-hidden rounded-lg border bg-background shadow-2xl"
+          className="lg-sheet pointer-events-auto flex h-[min(90vh,900px)] w-[min(96vw,1400px)] flex-col overflow-hidden rounded-lg border bg-background shadow-2xl"
           style={{ borderColor: 'var(--border)' }}
-        >
+        ><GlassBackdrop material="regular" />
           <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4" style={{ borderColor: 'var(--border)' }}>
             <Icon size={16} style={{ color: 'var(--muted-foreground)' }} />
             <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</h2>

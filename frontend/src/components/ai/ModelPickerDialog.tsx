@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react'
 import type { StoryAiModelOption } from '@/lib/api/types'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 type ModelPickerDialogProps = {
   open: boolean
@@ -140,7 +141,8 @@ export function ModelPickerDialog({ open, mode, models, selectedModel, onSelect,
   return createPortal(
     <div className="fixed inset-0 z-[140] flex items-center justify-center p-4 sm:p-6">
       <button type="button" aria-label="关闭模型选择" className="absolute inset-0 bg-black/55" onClick={onClose} />
-      <div role="dialog" aria-modal="true" aria-labelledby="model-picker-title" className="relative flex max-h-[min(80vh,720px)] w-full max-w-2xl flex-col overflow-hidden rounded-lg border" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--background)', boxShadow: '0 10px 24px rgb(0 0 0 / 0.16)' }}>
+      <div role="dialog" aria-modal="true" aria-labelledby="model-picker-title" className="desktop-dialog-surface lg-sheet flex max-h-[min(80vh,720px)] w-full max-w-2xl flex-col overflow-hidden rounded-lg border" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--background)', boxShadow: '0 10px 24px rgb(0 0 0 / 0.16)' }}>
+        <GlassBackdrop material="regular" />
         <div className="flex items-center gap-3 border-b px-4 py-3" style={{ borderColor: 'var(--border)' }}>
           <div className="flex size-8 shrink-0 items-center justify-center rounded-md" style={{ color: 'var(--primary)', backgroundColor: 'color-mix(in srgb, var(--primary) 10%, transparent)' }}>
             {mode === 'image' ? <ImageIcon size={16} /> : <MessageSquareText size={16} />}

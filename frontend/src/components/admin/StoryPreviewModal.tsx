@@ -24,6 +24,7 @@ import { StoryRichContent } from '@/components/StoryRichContent'
 import { getMilkdownText } from '@mo-gallery/milkdown/media'
 import { getStoryCoverImageStyle, getStoryCoverPhoto } from '@/lib/story-cover'
 import { prepareStoryContentForPreview, stripStoryContentToPlainText } from '@/lib/story-rich-content'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 interface StoryPreviewModalProps {
   story: StoryDto
@@ -108,7 +109,7 @@ export function StoryPreviewModal({
         onClick={onClose}
         adminVariant="icon"
         className="fixed top-6 right-6 z-[110] p-3 bg-background/80 backdrop-blur-sm border border-border rounded-full text-muted-foreground hover:text-foreground"
-      >
+      ><GlassBackdrop material="regular" />
         <X className="w-5 h-5" />
       </AdminButton>
 

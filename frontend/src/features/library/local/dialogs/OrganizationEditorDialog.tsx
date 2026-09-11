@@ -3,6 +3,7 @@ import { FolderPlus, Loader2, Tags, X } from 'lucide-react'
 import { SelectDropdown } from '@/components/ui/SelectDropdown'
 import type { CollectionGroup, LocalCollection, LocalTag } from '../types'
 import type { LocalLibraryCopy } from '../copy'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 type EditorKind = 'tag' | 'collection' | 'group'
 
@@ -61,7 +62,7 @@ export function OrganizationEditorDialog({ target, groups, copy, busy, onClose, 
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center p-5">
       <button type="button" aria-label={copy.cancelAction} className="absolute inset-0 bg-black/55 backdrop-blur-sm" onClick={onClose} />
-      <div role="dialog" aria-modal="true" className="relative w-full max-w-sm rounded-xl border bg-background p-5 shadow-2xl">
+      <div role="dialog" aria-modal="true" className="lg-sheet relative w-full max-w-sm rounded-xl border bg-background p-5 shadow-2xl"><GlassBackdrop material="regular" />
         <div className="flex items-start gap-3"><span className="flex size-9 items-center justify-center rounded-lg bg-secondary">{icon}</span><h2 className="min-w-0 flex-1 pt-2 text-sm font-semibold">{title}</h2><button type="button" onClick={onClose} disabled={busy} className="rounded-md p-1.5 hover:bg-secondary"><X size={15} /></button></div>
         <form className="mt-5 space-y-4" onSubmit={(event) => { event.preventDefault(); submit() }}>
           <label className="block text-[11px] font-medium">{copy.organizationName}<input ref={inputRef} value={name} onChange={(event) => setName(event.target.value)} disabled={busy} className="mt-2 h-9 w-full rounded-md border bg-input px-3 text-xs outline-none focus:ring-1 focus:ring-ring" /></label>

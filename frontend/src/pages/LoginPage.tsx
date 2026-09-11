@@ -1,39 +1,16 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { Globe, Moon, ShieldCheck, Sun } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { OfficialAuthForm } from '@/components/auth/OfficialAuthForm'
 import { AuthBrandPanel } from '@/components/layout/AuthBrandPanel'
 import { usePreferences } from '@/store/preferences'
 import { t } from '@/lib/i18n'
+import { useTheme } from '@/contexts/ThemeContext'
 
 export function LoginPage() {
-  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light')
-  const { language, theme, accent, setTheme, setLanguage } = usePreferences()
+  const { resolvedTheme } = useTheme()
+  const { language, setTheme, setLanguage } = usePreferences()
   const navigate = useNavigate()
-
-  // 登录页独立应用主题（AdminLayout 只覆盖登录后的页面）
-  useEffect(() => {
-    const applyTheme = () => {
-      const root = document.documentElement
-      root.classList.remove('light', 'dark')
-      const next =
-        theme === 'system'
-          ? window.matchMedia('(prefers-color-scheme: dark)').matches
-            ? 'dark'
-            : 'light'
-          : theme
-      setResolvedTheme(next)
-      root.classList.add(next)
-      root.dataset.accent = accent
-    }
-    applyTheme()
-
-    if (theme === 'system') {
-      const mq = window.matchMedia('(prefers-color-scheme: dark)')
-      mq.addEventListener('change', applyTheme)
-      return () => mq.removeEventListener('change', applyTheme)
-    }
-  }, [theme, accent])
 
   const copy = useMemo(() => ({
     welcome: t('admin.official_welcome', language),

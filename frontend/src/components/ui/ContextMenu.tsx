@@ -10,7 +10,7 @@ const ContextMenuPortal = ContextMenuPrimitive.Portal
 const ContextMenuSub = ContextMenuPrimitive.Sub
 const ContextMenuRadioGroup = ContextMenuPrimitive.RadioGroup
 
-const menuSurfaceClass = 'z-[120] min-w-44 overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-xl'
+const menuSurfaceClass = 'desktop-menu-surface z-[120] min-w-44 overflow-hidden rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-xl'
 
 const ContextMenuSubTrigger = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.SubTrigger>,

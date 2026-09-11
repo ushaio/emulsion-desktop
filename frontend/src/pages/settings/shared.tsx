@@ -9,8 +9,8 @@ export const inputStyle = {
 // 桌面端统一的表单控件样式（与资源库、信息面板一致）
 export const inputClass = 'h-8 w-full rounded-md border bg-input px-2.5 text-xs outline-none focus:ring-1 focus:ring-ring'
 export const textareaClass = 'w-full rounded-md border bg-input px-2.5 py-2 text-xs outline-none focus:ring-1 focus:ring-ring resize-none'
-export const btnPrimary = 'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-opacity hover:opacity-90 disabled:opacity-50'
-export const btnOutline = 'flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition-colors hover:bg-secondary disabled:opacity-50'
+export const btnPrimary = 'desktop-settings-primary flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-opacity hover:opacity-90 disabled:opacity-50'
+export const btnOutline = 'desktop-settings-outline flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition-colors hover:bg-secondary disabled:opacity-50'
 
 // 语义色（与桌面端状态点一致），深色/浅色主题均可读
 export const STATUS_COLORS: Record<string, { fg: string; bg: string }> = {
@@ -40,7 +40,7 @@ export function Badge({ children, tone, style: extraStyle }: {
 
 export function Section({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border p-5" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--card)' }}>
+    <div className="desktop-settings-section rounded-lg border p-5" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--card)' }}>
       <div className="mb-4">
         <h3 className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>{title}</h3>
         {description && <p className="mt-1 text-[11px] leading-5" style={{ color: 'var(--muted-foreground)' }}>{description}</p>}

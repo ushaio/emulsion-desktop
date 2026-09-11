@@ -1,6 +1,7 @@
 import { CheckCircle2, Database, Loader2, X } from 'lucide-react'
 import type { LibraryUpgradeInfo } from '../types'
 import type { LocalLibraryCopy } from '../copy'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 interface Props {
   copy: LocalLibraryCopy
@@ -23,7 +24,7 @@ export function LocalLibraryUpgradeDialog({ copy, info, phase, error, onStart, o
   return (
     <div className="fixed inset-0 z-[160] flex items-center justify-center p-5">
       <button type="button" aria-label={copy.upgradeCancel} disabled={busy || completed} className="absolute inset-0 bg-black/55 backdrop-blur-sm disabled:cursor-not-allowed" onClick={onCancel} />
-      <div role="dialog" aria-modal="true" aria-labelledby="local-library-upgrade-title" className="relative w-full max-w-md rounded-xl border bg-background shadow-2xl" style={{ borderColor: 'var(--border)' }}>
+      <div role="dialog" aria-modal="true" aria-labelledby="local-library-upgrade-title" className="lg-sheet relative w-full max-w-md rounded-xl border bg-background shadow-2xl" style={{ borderColor: 'var(--border)' }}><GlassBackdrop material="regular" />
         <div className="flex items-start gap-3 border-b p-5" style={{ borderColor: 'var(--border)' }}>
           <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary">
             {completed ? <CheckCircle2 size={18} className="text-emerald-500" /> : <Database size={17} />}

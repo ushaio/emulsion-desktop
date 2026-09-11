@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Trash2, AlertTriangle, Loader2, RefreshCw } from 'lucide-react'
 import { AdminButton } from '@/components/admin/AdminButton'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 interface SimpleDeleteDialogProps {
   isOpen: boolean
@@ -133,8 +134,8 @@ export function SimpleDeleteDialog({
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
               transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="bg-background border border-border p-8 max-w-md w-full shadow-2xl pointer-events-auto rounded-lg"
-            >
+              className="lg-sheet bg-background border border-border p-8 max-w-md w-full shadow-2xl pointer-events-auto rounded-lg"
+            ><GlassBackdrop material="regular" />
               <div className="flex items-center gap-4 mb-6">
                 <div className={`w-12 h-12 flex items-center justify-center rounded-lg ${confirmVariant === 'primary' ? 'bg-primary/10' : 'bg-destructive/10'}`}>
                   {confirmVariant === 'primary'

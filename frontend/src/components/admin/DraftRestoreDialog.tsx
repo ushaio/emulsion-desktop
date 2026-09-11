@@ -3,6 +3,7 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { FileArchive, Clock, X } from 'lucide-react'
 import { AdminButton } from '@/components/admin/AdminButton'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 interface DraftRestoreDialogProps {
   isOpen: boolean
@@ -41,8 +42,8 @@ export function DraftRestoreDialog({
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.95, opacity: 0 }}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md bg-background border border-border shadow-2xl rounded-lg overflow-hidden"
-          >
+            className="lg-sheet w-full max-w-md bg-background border border-border shadow-2xl rounded-lg overflow-hidden"
+          ><GlassBackdrop material="regular" />
             {/* Header */}
             <div className="flex items-center justify-between p-6 border-b border-border">
               <div className="flex items-center gap-3">

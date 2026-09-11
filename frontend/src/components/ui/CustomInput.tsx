@@ -32,7 +32,7 @@ export const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
     },
     ref
   ) => {
-    const baseInputClass = 'outline-none transition-colors placeholder:text-muted-foreground/30'
+    const baseInputClass = 'desktop-input outline-none transition-colors placeholder:text-muted-foreground/30'
 
     const adminVariantClasses = {
       form: 'w-full p-3 bg-background border-b border-border focus:border-primary text-sm rounded-none',

@@ -17,6 +17,7 @@ import { getStoryImageMatchCandidates, getStoryMarkdownImageUrls, getStoryRefere
 import { getMilkdownPhotoIds } from '@mo-gallery/milkdown/media'
 import { AdminButton } from '@/components/admin/AdminButton'
 import { cn } from '@/lib/utils'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 export interface PendingImage {
   id: string
@@ -398,7 +399,7 @@ export function StoryPhotoPanel({
                             onOpenMenuPhoto(null)
                           }}
                         />
-                        <div className="absolute right-0 top-8 z-50 min-w-[160px] border border-border bg-background py-1 shadow-lg">
+                        <div className="absolute right-0 top-8 z-50 min-w-[160px] border border-border bg-background py-1 shadow-lg"><GlassBackdrop material="regular" />
                           {photo.takenAt ? (
                             <AdminButton
                               onClick={(event) => {

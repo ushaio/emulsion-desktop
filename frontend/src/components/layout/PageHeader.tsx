@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 interface PageHeaderProps {
   title: string
@@ -8,8 +9,9 @@ interface PageHeaderProps {
 
 export function PageHeader({ title, description, actions }: PageHeaderProps) {
   return (
-    <div className="flex h-14 shrink-0 items-center justify-between border-b px-6"
+    <div className="desktop-page-header lg-sheet flex h-14 shrink-0 items-center justify-between border-b px-6"
       style={{ borderColor: 'var(--border)' }}>
+      <GlassBackdrop />
       <div>
         <h1 className="text-lg font-semibold">{title}</h1>
         {description && (

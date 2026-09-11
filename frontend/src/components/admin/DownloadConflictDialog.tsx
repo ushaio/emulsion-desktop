@@ -1,6 +1,7 @@
 import { AlertTriangle, X } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { usePreferences } from "@/store/preferences";
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 export type DownloadConflictPolicy = "rename" | "overwrite" | "skip";
 
@@ -61,9 +62,10 @@ export function DownloadConflictDialog({
       }}
     >
       <div
-        className="w-full max-w-md overflow-hidden rounded-lg border shadow-xl"
+        className="desktop-dialog-surface lg-sheet w-full max-w-md overflow-hidden rounded-lg border shadow-xl"
         style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}
       >
+        <GlassBackdrop material="regular" />
         <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: "var(--border)" }}>
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             <AlertTriangle size={15} style={{ color: "#f59e0b" }} />

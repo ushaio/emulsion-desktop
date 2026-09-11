@@ -1,5 +1,6 @@
 import { ImageOff, RefreshCw, X } from 'lucide-react'
 import type { LocalLibraryCopy } from '../copy'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 export function RepairThumbnailsDialog({ copy, busy, onClose, onMissing, onRebuildAll }: {
   copy: LocalLibraryCopy
@@ -11,7 +12,7 @@ export function RepairThumbnailsDialog({ copy, busy, onClose, onMissing, onRebui
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-5">
       <button type="button" aria-label={copy.cancelAction} onClick={onClose} className="absolute inset-0 bg-black/60" />
-      <div className="relative w-full max-w-md rounded-xl border bg-popover p-5 shadow-2xl" style={{ borderColor: 'var(--border)' }}>
+      <div className="lg-sheet relative w-full max-w-md rounded-xl border bg-popover p-5 shadow-2xl" style={{ borderColor: 'var(--border)' }}><GlassBackdrop material="regular" />
         <button type="button" aria-label={copy.cancelAction} onClick={onClose} disabled={busy} className="absolute right-3 top-3 rounded-md p-2 hover:bg-secondary disabled:opacity-50"><X size={16} /></button>
         <div className="pr-8">
           <h2 className="font-sans text-base font-medium">{copy.repairThumbnailsTitle}</h2>

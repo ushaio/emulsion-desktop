@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { Fragment, useMemo, useState, type FormEvent } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
@@ -21,6 +21,7 @@ import { useOfficialAuth } from '@/contexts/OfficialAuthContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { usePreferences } from '@/store/preferences'
 import { t } from '@/lib/i18n'
+import { useTheme } from '@/contexts/ThemeContext'
 
 export interface SetupState {
   completed: boolean
@@ -47,37 +48,13 @@ export function SetupPage({ initialState, onComplete }: Props) {
   const navigate = useNavigate()
   const { user: officialUser } = useOfficialAuth()
   const { isAuthenticated: siteConnected } = useAuth()
-  const { language, theme, accent, setTheme, setLanguage } = usePreferences()
+  const { language, setTheme, setLanguage } = usePreferences()
   const zh = language === 'zh'
   const [step, setStep] = useState(0)
   const [api, setApi] = useState({ ...fallbackState.api, ...initialState.api })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light')
-
-  // 引导页独立应用主题（AdminLayout 只覆盖登录后的页面）
-  useEffect(() => {
-    const applyTheme = () => {
-      const root = document.documentElement
-      root.classList.remove('light', 'dark')
-      const next =
-        theme === 'system'
-          ? window.matchMedia('(prefers-color-scheme: dark)').matches
-            ? 'dark'
-            : 'light'
-          : theme
-      setResolvedTheme(next)
-      root.classList.add(next)
-      root.dataset.accent = accent
-    }
-    applyTheme()
-
-    if (theme === 'system') {
-      const mq = window.matchMedia('(prefers-color-scheme: dark)')
-      mq.addEventListener('change', applyTheme)
-      return () => mq.removeEventListener('change', applyTheme)
-    }
-  }, [theme, accent])
+  const { resolvedTheme } = useTheme()
 
   const copy = useMemo(() => zh ? {
     eyebrow: '首次启动', title: '欢迎使用 Emulsion',

@@ -39,3 +39,6 @@ node_modules/
 
 # wails windows resource object (generated at build time)
 *.syso
+
+# third-party reference copies kept for design exploration only
+/.ui/

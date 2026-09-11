@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Check, Globe, Moon, Sun, TriangleAlert, Unplug } from 'lucide-react'
 import { WebConnectPanel } from '@/components/auth/WebConnectPanel'
@@ -7,6 +7,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { AUTH_ERROR_MESSAGE_KEY } from '@/lib/auth-errors'
 import { usePreferences } from '@/store/preferences'
 import { t } from '@/lib/i18n'
+import { useTheme } from '@/contexts/ThemeContext'
 import { DisconnectSite } from '../../wailsjs/go/main/App'
 
 /**
@@ -15,8 +16,8 @@ import { DisconnectSite } from '../../wailsjs/go/main/App'
  * 与登录页共用品牌面板布局，连接是可选步骤，可随时跳过。
  */
 export function ConnectPage() {
-  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light')
-  const { language, theme, accent, setTheme, setLanguage } = usePreferences()
+  const { resolvedTheme } = useTheme()
+  const { language, setTheme, setLanguage } = usePreferences()
   const navigate = useNavigate()
   const { isAuthenticated, user, logout } = useAuth()
   const [authNotice] = useState(() => {
@@ -24,30 +25,6 @@ export function ConnectPage() {
     sessionStorage.removeItem(AUTH_ERROR_MESSAGE_KEY)
     return message
   })
-
-  // 连接页独立应用主题（AdminLayout 只覆盖登录后的页面）
-  useEffect(() => {
-    const applyTheme = () => {
-      const root = document.documentElement
-      root.classList.remove('light', 'dark')
-      const next =
-        theme === 'system'
-          ? window.matchMedia('(prefers-color-scheme: dark)').matches
-            ? 'dark'
-            : 'light'
-          : theme
-      setResolvedTheme(next)
-      root.classList.add(next)
-      root.dataset.accent = accent
-    }
-    applyTheme()
-
-    if (theme === 'system') {
-      const mq = window.matchMedia('(prefers-color-scheme: dark)')
-      mq.addEventListener('change', applyTheme)
-      return () => mq.removeEventListener('change', applyTheme)
-    }
-  }, [theme, accent])
 
   const copy = useMemo(() => ({
     eyebrow: t('admin.connect_site', language),

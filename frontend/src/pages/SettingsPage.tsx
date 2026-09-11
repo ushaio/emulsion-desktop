@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { usePreferences, useSettingsNav, type SettingsTabKey } from '@/store/preferences'
 import { t } from '@/lib/i18n'
 import { Skeleton } from '@/components/admin/Skeleton'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 import { GetSettings, UpdateSettings } from '../../wailsjs/go/main/App'
 import {
   type LucideIcon,
@@ -162,7 +163,9 @@ export function SettingsPage({ isModal = false }: { isModal?: boolean } = {}) {
   const showSaveButton = isAuthenticated && activeSaveMode === 'unified'
 
   return (
-    <div className={isModal ? 'flex min-h-0 flex-1 flex-col' : 'flex h-full flex-col'}>
+    <div className={`desktop-settings-page ${isModal ? 'flex min-h-0 flex-1 flex-col' : 'lg-sheet flex h-full flex-col'}`}>
+      {/* 独立路由下设置页要自带玻璃面；作为浮层打开时，面由 desktop-settings-surface 提供。 */}
+      {!isModal && <GlassBackdrop material="regular" />}
       <PageHeader
         title={t('admin.page_settings', language)}
         actions={showSaveButton ? (
@@ -182,7 +185,7 @@ export function SettingsPage({ isModal = false }: { isModal?: boolean } = {}) {
 
       <div className="flex flex-1 overflow-hidden">
         {/* 左侧分组标签栏 */}
-        <div className="flex w-48 shrink-0 flex-col overflow-hidden border-r p-3" style={{ borderColor: 'var(--border)' }}>
+        <div className="desktop-settings-sidebar flex w-48 shrink-0 flex-col overflow-hidden border-r p-3" style={{ borderColor: 'var(--border)' }}>
           <nav className="custom-scrollbar min-h-0 flex-1 overflow-y-auto" aria-label="设置分区">
             {groups.map(group => (
               <div key={group.title} className="mb-3 last:mb-0">

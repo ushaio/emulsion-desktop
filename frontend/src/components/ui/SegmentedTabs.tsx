@@ -1,7 +1,10 @@
 'use client'
 
-import type { ComponentType, KeyboardEvent, ReactNode } from 'react'
+import { useId, type ComponentType, type KeyboardEvent, type ReactNode } from 'react'
+import { motion, useReducedMotion } from 'framer-motion'
 import { cn } from '@/lib/utils'
+import { usePreferences } from '@/store/preferences'
+import { GlassBackdrop } from './liquid-glass'
 
 /**
  * 分段式多页签控件（系统设置「主题」同款视觉）：
@@ -48,16 +51,20 @@ export function SegmentedTabs<T extends string = string>({
   onItemKeyDown,
 }: SegmentedTabsProps<T>) {
   const isLarge = size === 'md'
+  const glass = usePreferences(state => state.appearance === 'liquid-glass')
+  const reducedMotion = useReducedMotion()
+  const lensId = useId()
   return (
     <div
       role={semantic === 'radio' ? 'radiogroup' : 'tablist'}
       aria-label={ariaLabel}
       className={cn(
-        'flex items-center rounded-md border bg-background p-0.5',
+        'desktop-segmented-tabs flex items-center rounded-md border bg-background p-0.5',
         isLarge ? 'h-10' : 'h-8',
         className,
       )}
     >
+      {glass && <GlassBackdrop />}
       {options.map(({ value: optionValue, label, icon: Icon, trailing, title }) => {
         const active = optionValue === value
         return (
@@ -69,9 +76,19 @@ export function SegmentedTabs<T extends string = string>({
               ? { 'aria-checked': active }
               : { 'aria-selected': active, tabIndex: active ? 0 : -1 })}
             onClick={() => onChange(optionValue)}
-            onKeyDown={onItemKeyDown
-              ? (event) => onItemKeyDown(event, optionValue)
-              : undefined}
+            onKeyDown={(event) => {
+              onItemKeyDown?.(event, optionValue)
+              if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return
+              const index = options.findIndex(option => option.value === optionValue)
+              const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1
+                : ['ArrowRight', 'ArrowDown'].includes(event.key) ? (index + 1) % options.length
+                  : ['ArrowLeft', 'ArrowUp'].includes(event.key) ? (index - 1 + options.length) % options.length : -1
+              if (next < 0) return
+              event.preventDefault()
+              onChange(options[next].value)
+              const buttons = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(':scope > button')
+              buttons?.[next]?.focus()
+            }}
             title={title}
             {...itemAttributes?.(optionValue)}
             className={cn(
@@ -84,6 +101,13 @@ export function SegmentedTabs<T extends string = string>({
               color: active ? 'var(--accent-foreground)' : 'var(--muted-foreground)',
             }}
           >
+            {glass && active && <motion.span
+              aria-hidden="true"
+              className="lg-lens"
+              layoutId={lensId}
+              initial={false}
+              transition={reducedMotion ? { duration: 0 } : { type: 'spring', stiffness: 400, damping: 30 }}
+            />}
             {Icon ? <Icon size={isLarge ? 14 : 12} className="shrink-0" /> : null}
             <span className="truncate">{label}</span>
             {typeof trailing === 'function' ? trailing(active) : trailing}

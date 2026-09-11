@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import { FolderTreeSelect } from '../workbench/FolderTreeSelect'
 import type { FolderItem, FolderTrashEntry } from '../types'
 import type { LocalLibraryCopy } from '../copy'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 interface Props {
   entry: FolderTrashEntry
@@ -26,7 +27,7 @@ export function RestoreFolderDialog({ entry, folders, copy, busy, onClose, onCon
   return (
     <div className="fixed inset-0 z-[140] flex items-center justify-center p-5">
       <button type="button" aria-label={copy.cancelAction} onClick={onClose} className="absolute inset-0 bg-black/60" />
-      <div role="dialog" aria-modal="true" aria-labelledby="restore-folder-title" className="relative w-full max-w-md rounded-xl border bg-background p-5 shadow-2xl">
+      <div role="dialog" aria-modal="true" aria-labelledby="restore-folder-title" className="lg-sheet relative w-full max-w-md rounded-xl border bg-background p-5 shadow-2xl"><GlassBackdrop material="regular" />
         <div className="flex items-start gap-3">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary"><ArchiveRestore size={17} /></span>
           <div className="min-w-0 flex-1"><h2 id="restore-folder-title" className="text-sm font-semibold">{copy.restoreFolderBatch}</h2><p className="mt-1 break-all text-[10px] text-muted-foreground">{entry.originalPath}</p></div>

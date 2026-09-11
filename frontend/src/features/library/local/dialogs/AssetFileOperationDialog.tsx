@@ -3,6 +3,7 @@ import { FilePenLine, FolderInput, Loader2, X } from 'lucide-react'
 import { FolderTreeSelect } from '../workbench/FolderTreeSelect'
 import type { LocalLibraryCopy } from '../copy'
 import type { FolderItem, LocalAsset } from '../types'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 interface Props {
   mode: 'rename' | 'move'
@@ -41,7 +42,7 @@ export function AssetFileOperationDialog({ mode, asset, selectedCount, folders, 
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center p-5">
       <button type="button" aria-label={copy.cancelAction} className="absolute inset-0 bg-black/55 backdrop-blur-sm" onClick={onClose} />
-      <div role="dialog" aria-modal="true" aria-labelledby="asset-file-operation-title" className="relative w-full max-w-md rounded-xl border bg-background p-5 shadow-2xl">
+      <div role="dialog" aria-modal="true" aria-labelledby="asset-file-operation-title" className="lg-sheet relative w-full max-w-md rounded-xl border bg-background p-5 shadow-2xl"><GlassBackdrop material="regular" />
         <div className="flex items-start gap-3">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary">{mode === 'rename' ? <FilePenLine size={17} /> : <FolderInput size={17} />}</span>
           <div className="min-w-0 flex-1">

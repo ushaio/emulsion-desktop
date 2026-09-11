@@ -11,6 +11,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { usePreferences } from '@/store/preferences'
 import { t } from '@/lib/i18n'
 import { ACCENTS, DEFAULT_ACCENT } from '@/lib/accents'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 const navGroups = [
   [
@@ -55,7 +56,7 @@ interface SidebarProps {
 export function Sidebar({ onOpenSettings }: SidebarProps) {
   const { isAuthenticated } = useAuth()
   const { user: officialUser, logout: officialLogout } = useOfficialAuth()
-  const { language, theme, accent, sidebarCollapsed, setLanguage, setTheme, setSidebarCollapsed } = usePreferences()
+  const { language, theme, accent, appearance, sidebarCollapsed, setLanguage, setTheme, setSidebarCollapsed } = usePreferences()
   const { resolvedTheme } = useTheme()
   const location = useLocation()
   const navigate = useNavigate()
@@ -114,7 +115,7 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
 
   return (
     <aside
-      className="flex h-full shrink-0 flex-col select-none border-r"
+      className="desktop-sidebar lg-sheet flex h-full shrink-0 flex-col select-none border-r"
       onDragStartCapture={(event) => event.preventDefault()}
       style={{
         width: sidebarCollapsed ? 'var(--sidebar-collapsed-width)' : 'var(--sidebar-width)',
@@ -123,6 +124,7 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
         transition: 'width 180ms ease',
       }}
     >
+      <GlassBackdrop />
 
       {/* 导航 */}
       <nav className="flex-1 overflow-x-hidden overflow-y-auto px-2 py-2">
@@ -144,7 +146,7 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
                 draggable={false}
                 title={sidebarCollapsed ? t(key, language) : undefined}
                 className={({ isActive }) =>
-                  `mb-0.5 flex min-w-0 items-center whitespace-nowrap rounded-md py-2 text-sm transition-colors ${sidebarCollapsed ? 'justify-center px-0' : 'gap-3 px-3'} ${
+                  `desktop-nav-item mb-0.5 flex min-w-0 items-center whitespace-nowrap rounded-md py-2 text-sm transition-colors ${sidebarCollapsed ? 'justify-center px-0' : 'gap-3 px-3'} ${
                     isActive
                       ? 'font-medium'
                       : 'hover:opacity-80'
@@ -215,7 +217,7 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
                 </button>
               ))}
               {/* 配色仅浅色模式生效：深色下提示当前配色已暂停 */}
-              {accent !== DEFAULT_ACCENT && resolvedTheme === 'dark' && (
+              {appearance === 'classic' && accent !== DEFAULT_ACCENT && resolvedTheme === 'dark' && (
                 <div
                   className="border-t px-3 py-2 text-[11px] leading-4"
                   style={{ borderColor: 'var(--border)', color: 'var(--muted-foreground)' }}
@@ -325,9 +327,10 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
             onClick={() => setShowLogoutConfirm(false)}
           />
           <div
-            className="relative w-full max-w-sm rounded-lg border p-5 shadow-xl"
+            className="desktop-dialog-surface lg-sheet relative w-full max-w-sm rounded-lg border p-5 shadow-xl"
             style={{ backgroundColor: 'var(--popover)', borderColor: 'var(--border)' }}
           >
+            <GlassBackdrop material="regular" />
             <h3 className="text-sm font-medium" style={{ color: 'var(--popover-foreground)' }}>
               {t('admin.logout_confirm_title', language)}
             </h3>

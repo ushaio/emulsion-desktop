@@ -108,7 +108,7 @@ export function SelectDropdown({
           event.stopPropagation()
           setOpen((prev) => !prev)
         }}
-        className={`flex w-full items-center justify-between gap-2 rounded-lg border text-left outline-none transition-colors focus:border-primary disabled:cursor-not-allowed disabled:opacity-50 ${triggerClass}`}
+        className={`desktop-select-trigger flex w-full items-center justify-between gap-2 rounded-lg border text-left outline-none transition-colors focus:border-primary disabled:cursor-not-allowed disabled:opacity-50 ${triggerClass}`}
         style={{
           borderColor: 'var(--border)',
           backgroundColor: 'var(--background)',
@@ -130,7 +130,7 @@ export function SelectDropdown({
       {open && (
         <div
           role="listbox"
-          className={`absolute left-0 z-20 max-h-56 w-full overflow-y-auto rounded-lg border shadow-lg ${placement === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'}`}
+          className={`desktop-menu-surface absolute left-0 z-20 max-h-56 w-full overflow-y-auto rounded-lg border shadow-lg ${placement === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'}`}
           style={{ borderColor: 'var(--border)', backgroundColor: 'var(--background)' }}
           onClick={(event) => event.stopPropagation()}
         >

@@ -663,7 +663,7 @@ export function UploadPage() {
                           const basePath = selectedSource?.basePath
                           if (!basePath) return null
                           return (
-                            <div className="absolute z-20 left-0 top-full mt-0.5 min-w-full border rounded-md shadow-lg"
+                            <div className="desktop-menu-surface absolute z-20 left-0 top-full mt-0.5 min-w-full border rounded-md shadow-lg"
                               style={{ borderColor: 'var(--border)', backgroundColor: 'var(--background)' }}
                               onClick={e => e.stopPropagation()}>
                               <button type="button"

@@ -14,7 +14,9 @@ import { t } from '@/lib/i18n'
 import { usePreferences } from '@/store/preferences'
 import { useAuth } from '@/contexts/AuthContext'
 import { WebConnectPanel } from '@/components/auth/WebConnectPanel'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 import { useDesktopSiteIdentity } from './useDesktopSiteIdentity'
+import { ThemeAppearance } from '@/contexts/ThemeContext'
 
 function CaptionIconMinimize() {
   return (
@@ -139,10 +141,11 @@ function DesktopTitleBar() {
 
   return (
     <header
-      className={`desktop-title-bar window-drag-region relative z-10 flex h-9 shrink-0 select-none items-center${isFocused ? '' : ' is-unfocused'}`}
+      className={`desktop-title-bar lg-sheet window-drag-region relative z-10 flex h-9 shrink-0 select-none items-center${isFocused ? '' : ' is-unfocused'}`}
       style={{ backgroundColor: 'var(--card)', color: 'var(--muted-foreground)' }}
       onDoubleClick={toggleMaximise}
     >
+      <GlassBackdrop />
       {hasSidebar ? (
         <div
           data-site-menu-root
@@ -291,9 +294,10 @@ function DesktopTitleBar() {
             onClick={() => setConnectOpen(false)}
           />
           <div
-            className="relative w-full max-w-sm overflow-hidden rounded-lg border shadow-xl"
+            className="desktop-dialog-surface lg-sheet relative w-full max-w-sm overflow-hidden rounded-lg border shadow-xl"
             style={{ backgroundColor: 'var(--popover)', borderColor: 'var(--border)' }}
           >
+            <GlassBackdrop material="regular" />
             <div
               className="flex items-center justify-between border-b px-5 py-3"
               style={{ borderColor: 'var(--border)' }}
@@ -329,8 +333,9 @@ function DesktopTitleBar() {
 export function DesktopWindowFrame({ children }: { children: ReactNode }) {
   return (
     <div className="integrated-window-frame flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
+      <ThemeAppearance />
       <DesktopTitleBar />
-      <div className="relative z-0 min-h-0 flex-1 overflow-hidden">{children}</div>
+      <div className="desktop-window-body relative z-0 min-h-0 flex-1 overflow-hidden">{children}</div>
     </div>
   )
 }

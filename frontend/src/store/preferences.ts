@@ -2,17 +2,28 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 import { DEFAULT_ACCENT, type AccentId } from '@/lib/accents'
+import {
+  GLASS_DEFAULTS,
+  normalizeTuning,
+  type GlassCanvas,
+  type RefractionMode,
+  type GlassTuning,
+} from '@/lib/liquid-glass'
 import { DEFAULT_ZINE_VIEW_OPTIONS, type ZineViewOptionKey, type ZineViewOptions } from '@/lib/zine/view-options'
 import type { ZineAiMode } from '@/lib/zine/zine-ai-permission'
 
 type PhotoViewMode = 'crop' | 'fit' | 'masonry'
 
-interface AdminPreferences {
+interface AdminPreferences extends GlassTuning {
   photoColumns: number
   photoGridSize: number
   photoViewMode: PhotoViewMode
   language: 'zh' | 'en'
   theme: 'light' | 'dark' | 'system'
+  appearance: 'classic' | 'liquid-glass'
+  /** What the glass refracts: the accent-coloured light field, or a flat neutral ground. */
+  glassCanvas: GlassCanvas
+  reduceTransparency: boolean
   accent: AccentId
   sidebarCollapsed: boolean
   zineStripWidth: number
@@ -24,6 +35,13 @@ interface AdminPreferences {
   setPhotoViewMode: (mode: PhotoViewMode) => void
   setLanguage: (lang: 'zh' | 'en') => void
   setTheme: (theme: 'light' | 'dark' | 'system') => void
+  setAppearance: (appearance: 'classic' | 'liquid-glass') => void
+  setGlassCanvas: (canvas: GlassCanvas) => void
+  setReduceTransparency: (enabled: boolean) => void
+  /** Partial patch: the appearance panel edits one knob at a time. */
+  setGlassTuning: (patch: Partial<GlassTuning>) => void
+  setGlassMode: (mode: RefractionMode) => void
+  resetGlassTuning: () => void
   setAccent: (accent: AccentId) => void
   setSidebarCollapsed: (collapsed: boolean) => void
   setZineStripWidth: (n: number) => void
@@ -40,6 +58,10 @@ export const usePreferences = create<AdminPreferences>()(
       photoViewMode: 'fit',
       language: 'zh',
       theme: 'system',
+      appearance: 'classic',
+      ...GLASS_DEFAULTS,
+      glassCanvas: 'aurora',
+      reduceTransparency: false,
       accent: DEFAULT_ACCENT,
       sidebarCollapsed: false,
       zineStripWidth: 176,
@@ -51,6 +73,12 @@ export const usePreferences = create<AdminPreferences>()(
       setPhotoViewMode: (mode) => set({ photoViewMode: mode }),
       setLanguage: (lang) => set({ language: lang }),
       setTheme: (theme) => set({ theme }),
+      setAppearance: (appearance) => set({ appearance }),
+      setGlassCanvas: (glassCanvas) => set({ glassCanvas }),
+      setReduceTransparency: (reduceTransparency) => set({ reduceTransparency }),
+      setGlassTuning: (patch) => set(patch),
+      setGlassMode: (mode) => set({ mode }),
+      resetGlassTuning: () => set({ ...GLASS_DEFAULTS }),
       setAccent: (accent) => set({ accent }),
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
       setZineStripWidth: (n) => set({ zineStripWidth: n }),
@@ -64,7 +92,34 @@ export const usePreferences = create<AdminPreferences>()(
           : [...state.zineFavoriteFonts, fontFamily],
       })),
     }),
-    { name: 'mo-gallery-preferences' },
+    {
+      name: 'mo-gallery-preferences',
+      // The glass material was rebuilt on liquid-glass-react, so the old
+      // glassBackground / glassNeon keys no longer describe anything. Anything
+      // that cannot be carried across is dropped rather than reinterpreted, and
+      // the tuning is normalised because a persisted out-of-range value reaches
+      // the SVG filter, where it renders as a blank sheet.
+      version: 2,
+      migrate: (persisted, version) => {
+        const saved = (persisted ?? {}) as Record<string, unknown>
+        if (version < 2) {
+          // 'frosted' meant the accent-coloured field, which is now 'aurora'.
+          saved.glassCanvas = saved.glassBackground === 'neutral' ? 'neutral' : 'aurora'
+          delete saved.glassBackground
+          delete saved.glassNeon
+        }
+        return saved as unknown as AdminPreferences
+      },
+      merge: (persisted, current) => {
+        const saved = (persisted ?? {}) as Partial<AdminPreferences>
+        return {
+          ...current,
+          ...saved,
+          ...normalizeTuning(saved),
+          glassCanvas: saved.glassCanvas === 'neutral' ? 'neutral' : 'aurora',
+        }
+      },
+    },
   ),
 )
 

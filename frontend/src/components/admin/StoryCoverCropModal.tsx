@@ -12,6 +12,7 @@ import {
   type StoryCoverCrop,
 } from '@/lib/story-cover'
 import { AdminButton } from '@/components/admin/AdminButton'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 interface StoryCoverCropModalProps {
   photo: PhotoDto
@@ -178,7 +179,7 @@ export function StoryCoverCropModal({
 
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-      <div className="grid max-h-[90vh] w-full max-w-6xl overflow-hidden border border-border bg-background shadow-[0_32px_80px_rgba(0,0,0,0.4)] lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-[auto_minmax(0,1fr)_auto]">
+      <div className="lg-sheet grid max-h-[90vh] w-full max-w-6xl overflow-hidden border border-border bg-background shadow-[0_32px_80px_rgba(0,0,0,0.4)] lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-[auto_minmax(0,1fr)_auto]"><GlassBackdrop material="regular" />
         <div className={`${PANEL_HEADER_CLASSNAME} lg:border-r`}>
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-md border border-border/80 bg-background/90 shadow-[0_8px_20px_rgba(15,23,42,0.08)]">

@@ -11,6 +11,7 @@ import type { ZineProject } from '@/lib/zine/types'
 import { usePreferences } from '@/store/preferences'
 
 import { downloadZinePdf, prepareZinePdf, type PreparedZinePdf, type ZinePdfVariant } from './export/ZinePdfExporter'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 interface ZineExportDialogProps {
   open: boolean
@@ -115,9 +116,9 @@ export function ZineExportDialog({ open, project, onClose }: ZineExportDialogPro
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96, y: 8 }}
               transition={{ duration: 0.18, ease: 'easeOut' }}
-              className="pointer-events-auto max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border bg-background p-6 shadow-2xl"
+              className="lg-sheet pointer-events-auto max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border bg-background p-6 shadow-2xl"
               style={{ borderColor: 'var(--border)' }}
-            >
+            ><GlassBackdrop material="regular" />
               <div className="mb-4 flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                   <Download size={18} style={{ color: 'var(--primary)' }} />

@@ -7,6 +7,7 @@ import { t } from '@/lib/i18n'
 import { CUSTOM_SIZE_MAX_MM, CUSTOM_SIZE_MIN_MM, clampCustomSizeMm, getPageSize, PAGE_SIZES } from '@/lib/zine/page-sizes'
 import type { ZineCustomSizeMm, ZinePageOrientation, ZinePageSize } from '@/lib/zine/types'
 import { usePreferences } from '@/store/preferences'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 export interface ZineCreateOptions {
   pageSize: ZinePageSize
@@ -59,9 +60,9 @@ export function ZineCreateDialog({ open, creating, onCancel, onCreate }: ZineCre
           initial={{ opacity: 0, scale: 0.96, y: 8 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           transition={{ duration: 0.18, ease: 'easeOut' }}
-          className="pointer-events-auto w-full max-w-md rounded-xl border bg-background p-6 shadow-2xl"
+          className="lg-sheet pointer-events-auto w-full max-w-md rounded-xl border bg-background p-6 shadow-2xl"
           style={{ borderColor: 'var(--border)' }}
-        >
+        ><GlassBackdrop material="regular" />
               <div className="mb-5 flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                   <BookImage size={18} style={{ color: 'var(--primary)' }} />

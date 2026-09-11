@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react'
 import { Film, X, Search, Check } from 'lucide-react'
 import type { FilmRollDto } from '@/lib/api/types'
 import { AdminButton } from '@/components/admin/AdminButton'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 interface FilmRollSelectorModalProps {
   isOpen: boolean
@@ -48,7 +49,7 @@ export function FilmRollSelectorModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={handleClose} />
-      <div className="relative bg-background border border-border shadow-2xl w-full max-w-md max-h-[70vh] flex flex-col">
+      <div className="lg-sheet relative bg-background border border-border shadow-2xl w-full max-w-md max-h-[70vh] flex flex-col"><GlassBackdrop material="regular" />
         <div className="flex items-center justify-between p-4 border-b border-border">
           <div className="flex items-center gap-3">
             <Film className="w-4 h-4 text-primary" />

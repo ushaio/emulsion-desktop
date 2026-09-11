@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
+import { usePreferences } from '@/store/preferences'
 
 interface LibrarySelectionBarProps {
   children: ReactNode
@@ -16,11 +18,14 @@ export function LibrarySelectionBar({
   countLabel,
   className,
 }: LibrarySelectionBarProps) {
+  const appearance = usePreferences(state => state.appearance)
+  const glass = appearance === 'liquid-glass'
   return (
     <div
-      className={`pointer-events-auto flex items-center gap-0.5 rounded-lg border px-1.5 py-1.5 shadow-lg ${className ?? ''}`}
-      style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}
+      className={`pointer-events-auto ${glass ? 'lg-selection-bar lg-sheet' : ''} flex items-center gap-0.5 rounded-lg border px-1.5 py-1.5 shadow-lg ${className ?? ''}`}
+      style={{ backgroundColor: glass ? undefined : 'var(--card)', borderColor: 'var(--border)' }}
     >
+      {glass && <GlassBackdrop material="regular" />}
       {countLabel && (
         <>
           <span className="whitespace-nowrap px-2 text-xs font-medium">

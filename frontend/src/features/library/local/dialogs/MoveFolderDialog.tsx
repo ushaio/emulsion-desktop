@@ -3,6 +3,7 @@ import { FolderInput, Loader2, X } from 'lucide-react'
 import { FolderTreeSelect } from '../workbench/FolderTreeSelect'
 import type { LocalLibraryCopy } from '../copy'
 import type { FolderFileOperationPlan, FolderItem } from '../types'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 interface Props {
   mode: 'rename' | 'move'
@@ -40,7 +41,7 @@ export function MoveFolderDialog({ mode, relativePath, currentName, folders, cop
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center p-5">
       <button type="button" aria-label={copy.cancelAction} className="absolute inset-0 bg-black/55 backdrop-blur-sm" onClick={onClose} />
-      <div role="dialog" aria-modal="true" aria-labelledby="move-folder-title" className="relative w-full max-w-md rounded-xl border bg-background p-5 shadow-2xl">
+      <div role="dialog" aria-modal="true" aria-labelledby="move-folder-title" className="lg-sheet relative w-full max-w-md rounded-xl border bg-background p-5 shadow-2xl"><GlassBackdrop material="regular" />
         <div className="flex items-start gap-3">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-secondary"><FolderInput size={17} /></span>
           <div className="min-w-0 flex-1">

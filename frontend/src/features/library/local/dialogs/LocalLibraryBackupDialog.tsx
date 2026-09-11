@@ -3,6 +3,7 @@ import { DatabaseBackup, Loader2, RotateCcw, X } from 'lucide-react'
 import { formatBytes } from '@/lib/utils'
 import type { BackupInfo, BackupOverview } from '../types'
 import type { LocalLibraryCopy } from '../copy'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 interface Props {
   copy: LocalLibraryCopy
@@ -35,7 +36,7 @@ export function LocalLibraryBackupDialog({ copy, overview, loading, operation, o
   return (
     <div className="fixed inset-0 z-[140] flex items-center justify-center p-5">
       <button type="button" aria-label={copy.cancelAction} disabled={busy} className="absolute inset-0 bg-black/55 backdrop-blur-sm" onClick={onClose} />
-      <div role="dialog" aria-modal="true" aria-labelledby="local-library-backup-title" className="relative flex max-h-[80vh] w-full max-w-xl flex-col rounded-xl border bg-background shadow-2xl">
+      <div role="dialog" aria-modal="true" aria-labelledby="local-library-backup-title" className="lg-sheet relative flex max-h-[80vh] w-full max-w-xl flex-col rounded-xl border bg-background shadow-2xl"><GlassBackdrop material="regular" />
         <div className="flex items-center gap-3 border-b p-5">
           <span className="flex size-9 items-center justify-center rounded-lg bg-secondary"><DatabaseBackup size={17} /></span>
           <div className="min-w-0 flex-1">

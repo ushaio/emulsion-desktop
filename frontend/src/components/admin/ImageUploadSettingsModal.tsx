@@ -8,6 +8,7 @@ import type { CompressionMode, CompressionFormat } from '@/lib/image-compress'
 import { normalizeCompressionMode, normalizeCompressionFormat } from '@/lib/image-compress'
 import { AdminButton } from '@/components/admin/AdminButton'
 import { PhotoUploadParams, type PhotoUploadSettings } from '@/components/admin/PhotoUploadParams'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 export interface UploadSettings {
   maxSizeMB?: number
@@ -146,8 +147,8 @@ export function ImageUploadSettingsModal(props: ImageUploadSettingsModalProps) {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96, y: 8 }}
               transition={{ duration: 0.18, ease: 'easeOut' }}
-              className="pointer-events-auto flex max-h-[90vh] w-full max-w-2xl flex-col rounded-lg border border-border bg-background shadow-2xl outline-none"
-            >
+              className="lg-sheet pointer-events-auto flex max-h-[90vh] w-full max-w-2xl flex-col rounded-lg border border-border bg-background shadow-2xl outline-none"
+            ><GlassBackdrop material="regular" />
               <ImageUploadSettingsModalContent key={JSON.stringify(props.initialSettings ?? {})} {...props} />
             </motion.div>
           </div>

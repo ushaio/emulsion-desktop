@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { AlertTriangle, FileWarning, Loader2, X } from 'lucide-react'
 import type { AssetFileOperationPlan } from '../types'
 import type { LocalLibraryCopy } from '../copy'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 interface Props {
   plan: AssetFileOperationPlan
@@ -22,7 +23,7 @@ export function AssetMoveConflictDialog({ plan, copy, busy, onClose, onConfirm }
   return (
     <div className="fixed inset-0 z-[140] flex items-center justify-center p-5">
       <button type="button" aria-label={copy.cancelAction} onClick={onClose} disabled={busy} className="absolute inset-0 bg-black/60" />
-      <div role="dialog" aria-modal="true" aria-labelledby="asset-move-conflict-title" className="relative w-full max-w-md rounded-xl border bg-background p-5 shadow-2xl">
+      <div role="dialog" aria-modal="true" aria-labelledby="asset-move-conflict-title" className="lg-sheet relative w-full max-w-md rounded-xl border bg-background p-5 shadow-2xl"><GlassBackdrop material="regular" />
         <div className="flex items-start gap-3">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-300"><AlertTriangle size={17} /></span>
           <div className="min-w-0 flex-1">

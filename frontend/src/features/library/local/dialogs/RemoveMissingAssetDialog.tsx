@@ -1,6 +1,7 @@
 import { AlertTriangle, Trash2, X } from 'lucide-react'
 import type { LocalAsset } from '../types'
 import type { LocalLibraryCopy } from '../copy'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 export function RemoveMissingAssetDialog({ asset, copy, busy, onClose, onConfirm }: {
   asset: LocalAsset
@@ -12,7 +13,7 @@ export function RemoveMissingAssetDialog({ asset, copy, busy, onClose, onConfirm
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-5">
       <button type="button" aria-label={copy.cancelAction} onClick={onClose} className="absolute inset-0 bg-black/60" />
-      <div className="relative w-full max-w-md rounded-xl border bg-popover p-5 shadow-2xl" style={{ borderColor: 'var(--border)' }}>
+      <div className="lg-sheet relative w-full max-w-md rounded-xl border bg-popover p-5 shadow-2xl" style={{ borderColor: 'var(--border)' }}><GlassBackdrop material="regular" />
         <button type="button" aria-label={copy.cancelAction} onClick={onClose} disabled={busy} className="absolute right-3 top-3 rounded-md p-2 hover:bg-secondary disabled:opacity-50"><X size={16} /></button>
         <div className="flex gap-4 pr-8">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-secondary"><AlertTriangle size={19} style={{ color: 'var(--destructive)' }} /></span>

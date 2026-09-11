@@ -20,6 +20,7 @@ import {
 } from "../../../wailsjs/go/main/App";
 import { main } from "../../../wailsjs/go/models";
 import type { storage_plugins } from "../../../wailsjs/go/models";
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 interface StorageMoveDialogProps {
   photos: Photo[];
@@ -192,9 +193,10 @@ export function StorageMoveDialog({ photos, sources, onClose, onMoved }: Storage
       }}
     >
       <div
-        className="flex max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border shadow-xl"
+        className="desktop-dialog-surface lg-sheet flex max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border shadow-xl"
         style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}
       >
+        <GlassBackdrop material="regular" />
         <div className="flex shrink-0 items-center justify-between border-b px-4 py-3" style={{ borderColor: "var(--border)" }}>
           <h3 className="text-sm font-semibold">{t("admin.storage_move_title", language)}</h3>
           <button

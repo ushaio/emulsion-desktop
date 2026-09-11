@@ -52,6 +52,7 @@ import {
   Plus,
   type LucideIcon,
 } from 'lucide-react'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 interface StoryDraftWithPreviews extends Omit<StoryDraftData, 'files'> {
   files: { id: string; file: File; preview: string }[]
@@ -910,9 +911,9 @@ function PhotoJournalContent() {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.96, opacity: 0 }}
               onClick={(e) => e.stopPropagation()}
-              className="flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border bg-background shadow-2xl"
+              className="lg-sheet flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border bg-background shadow-2xl"
               style={{ borderColor: 'var(--border)' }}
-            >
+            ><GlassBackdrop material="regular" />
               {/* 弹窗头部 */}
               <div className="flex items-center justify-between border-b p-6" style={{ borderColor: 'var(--border)' }}>
                 <div className="min-w-0">

@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react'
 import { BookOpen, X, Search, Check } from 'lucide-react'
 import type { StoryDto } from '@/lib/api/types'
 import { AdminButton } from '@/components/admin/AdminButton'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 interface StorySelectorModalProps {
   isOpen: boolean
@@ -62,7 +63,7 @@ export function StorySelectorModal({
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
         onClick={handleClose}
       />
-      <div className="relative bg-background border border-border shadow-2xl w-full max-w-md max-h-[70vh] flex flex-col">
+      <div className="lg-sheet relative bg-background border border-border shadow-2xl w-full max-w-md max-h-[70vh] flex flex-col"><GlassBackdrop material="regular" />
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-border">
           <div className="flex items-center gap-3">

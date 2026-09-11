@@ -6,6 +6,7 @@ import type { EditorType } from '@/lib/api/types'
 import { AdminButton } from '@/components/admin/AdminButton'
 import { StoryRichContent } from '@/components/StoryRichContent'
 import { formatRelativeTimeLabel } from '@/lib/utils'
+import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
 interface BlogPreviewModalProps {
   blog: {
@@ -34,9 +35,9 @@ export function BlogPreviewModal({ blog, updatedAt, t, onClose }: BlogPreviewMod
     >
       <div
         onClick={(event) => event.stopPropagation()}
-        className="flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border bg-background shadow-2xl"
+        className="lg-sheet flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border bg-background shadow-2xl"
         style={{ borderColor: 'var(--border)' }}
-      >
+      ><GlassBackdrop material="regular" />
         {/* 头部 */}
         <div className="flex items-center justify-between border-b p-6" style={{ borderColor: 'var(--border)' }}>
           <div className="min-w-0">

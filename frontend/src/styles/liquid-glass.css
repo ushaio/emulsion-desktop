@@ -1,0 +1,1244 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Emulsion · 液态玻璃主题
+   ══════════════════════════════════════════════════════════════════════════
+
+   材质本身实现在 components/ui/liquid-glass/（liquid-glass-react 的移植）：
+   折射、色散、边缘受光、弹性都由那里按元素尺寸实时算出。这份表负责**风格**：
+   背景光幕、玻璃的色调与投影、以及每一个既有类名在新材质下的样子。
+
+   三件事在这里定义：
+
+   1. 语义 token（--background/--foreground/--card …）。改这套值，整个应用
+      ——包括复用 Web 端的 Tailwind 类——就跟着换色，不需要改组件。
+   2. 材质 token（--lg-*）。玻璃的底色、描边、投影、边缘强度。配色相关的
+      --lg-accent*、--lg-aurora-*、--lg-rim-tint、--lg-glow 由 ThemeContext
+      按配色与明暗写入 <html> 的行内样式；这里只给首帧兜底值。
+   3. 配方（.lg-*）。玻璃该怎么贴在既有结构上。
+
+   ── 两条必须遵守的结构前提 ──────────────────────────────────────────
+
+   **背景光幕必须在最外层元素上。** backdrop-filter 只取「更早绘制、且同在
+   一个 backdrop root 之内」的内容。窗口根元素（.integrated-window-frame）画
+   光幕（::before），从它到玻璃之间**不能再有会形成 backdrop root 的祖先**
+   （filter / backdrop-filter / opacity<1 / mask / mix-blend-mode / isolation），
+   否则玻璃后面什么都取不到，只剩一层灰底。transform 尤其常见，别加。
+
+   **玻璃片的宿主容器自己就是层叠上下文。** .lg-sheet 设为
+   position:relative + z-index:0，玻璃片以 z-index:-1 贴在内侧，于是绘制顺序
+   恒为「容器底色 → 玻璃片 → 容器内容」。这样每个结构面各自独立、互不依赖
+   外层是谁；而 z-index 不会形成 backdrop root，背景光幕照样取得到。
+   代价是容器**不能有不透明底色**，否则会盖住玻璃片——新主题里这些栅格本
+   来就是透明的，光幕从缝隙透上来。
+
+   ── 为什么不给所有地方都装 JS 材质 ──────────────────────────────────
+
+   折射需要知道元素尺寸才能生成位移图，纯 CSS 做不到。结构固定、值得为之开
+   销的地方（窗口栏、侧栏、设置、对话框、菜单、输入、工具栏）都挂了
+   <GlassBackdrop/> 或 <GlassSurface/>；散落在各页面、无法逐个改写的弹窗仍由
+   下面的 CSS 兜底，给到模糊 + 底色 + 描边 + 投影，只是没有折射。兜底规则用
+   `:not(:has(> .lg-backdrop))` 限定，有 JS 材质时不会重复上色。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── 材质：与配色无关的默认值 ──────────────────────────────────── */
+  --lg-grain: url('/textures/frosted-grain.png');
+  --lg-grain-opacity: 0.5;
+  --lg-blur: 14px;
+  --lg-saturate: 1.4;
+  --lg-rim-opacity: 0.35;
+  --lg-rim-opacity-strong: 1;
+  --lg-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --lg-radius-pill: 999px;
+  --lg-radius-panel: 14px;
+  --lg-radius-control: 10px;
+
+  /* 首帧兜底：ThemeAppearance 挂载前先按默认配色（银盐·浅色）画一次，
+     避免闪一帧无色。挂载后由行内样式覆盖。 */
+  --lg-accent: #0a63d6;
+  --lg-accent-from: #0a63d6;
+  --lg-accent-to: #5b4bd6;
+  --lg-accent-gradient: linear-gradient(135deg, var(--lg-accent-from), var(--lg-accent-to));
+  --lg-glow: rgb(10 99 214 / 0.3);
+  --lg-rim-tint: rgb(255 255 255 / 0.85);
+  --lg-aurora-1: rgb(0 122 255 / 0.5);
+  --lg-aurora-2: rgb(122 92 255 / 0.46);
+  --lg-aurora-3: rgb(255 92 168 / 0.36);
+
+  /* 光幕构图：只摆放光源，颜色全部来自上面三个变量。 */
+  --lg-aurora-image:
+    radial-gradient(58% 46% at 14% -6%, var(--lg-aurora-1), transparent 68%),
+    radial-gradient(52% 44% at 88% 2%, var(--lg-aurora-2), transparent 66%),
+    radial-gradient(64% 52% at 68% 104%, var(--lg-aurora-3), transparent 70%);
+}
+
+/* ══ 外观配色 ═══════════════════════════════════════════════════════════
+   液态玻璃的语义 token。选择器带 [data-accent] 是为了与
+   `:root:not(.dark)[data-accent='…']` 那套经典配色同具体度，靠位置在后来胜出；
+   深色块用 `.dark` 提高一级。改这里之前先看 index.css 中「配色方案」一节。
+
+   **这一层是「全应用覆盖」的关键。** 全仓库有近 200 处行内
+   `backgroundColor: 'var(--card)'` 这类写法，另有 39 处 bg-card、89 处
+   bg-background、47 处 bg-muted、21 处 bg-popover……逐个改调用点既不现实，也会
+   持续腐化。把语义 token 本身改成**半透明**，这些表面就自动带上玻璃色调，一处
+   改动覆盖全部页面、组件与弹窗；以后新写的代码只要用语义 token，也自动落在同一
+   套材质里。
+
+   透明度按「阅读优先」定：面板类 0.5 上下、弹窗与菜单 0.7 上下——足够透出背景
+   光幕的色相，又不至于让正文压不住。--foreground / --muted-foreground 保持实色，
+   对比度因此稳定。
+
+   注意这里**只做颜色，不做 backdrop-filter**：色是免费的，模糊要为每个元素开一块
+   GPU 层。照片网格一屏可能上百个瓦片，逐个加模糊会直接卡住滚动。模糊与折射只给
+   结构面（窗口栏、侧栏、工具栏、面板、弹窗、菜单）。 */
+html:root[data-appearance='liquid-glass'][data-accent] {
+  --background: rgb(255 255 255 / 0.34);
+  --foreground: #1b1e23;
+  --card: rgb(255 255 255 / 0.52);
+  --card-foreground: #1b1e23;
+  --popover: rgb(252 253 255 / 0.7);
+  --popover-foreground: #1b1e23;
+  --primary: var(--lg-accent);
+  --primary-foreground: #fff;
+  --secondary: rgb(255 255 255 / 0.46);
+  --secondary-foreground: #262a31;
+  --muted: rgb(255 255 255 / 0.34);
+  --muted-foreground: #5c636d;
+  --accent: color-mix(in srgb, var(--lg-accent) 14%, rgb(255 255 255 / 0.34));
+  --accent-foreground: var(--lg-accent);
+  --border: rgb(24 32 46 / 0.12);
+  --input: rgb(255 255 255 / 0.42);
+  --ring: var(--lg-accent);
+  --destructive: #b92e3d;
+  --destructive-foreground: #fff;
+
+  /* 光幕底色与它下面的一层线性渐层（给光源兜底，避免纯黑或纯白空洞）。 */
+  --lg-canvas-base: #eceff5;
+  --lg-canvas-tint: linear-gradient(158deg, #f8fafd, #e9eef6 46%, #f4edf6);
+  --lg-window-shadow: 0 20px 60px rgb(18 26 42 / 0.18);
+
+  /* 玻璃面：clear 是镜头（轻），regular 是面板（厚）。 */
+  --lg-tint: rgb(255 255 255 / 0.26);
+  --lg-tint-regular: rgb(255 255 255 / 0.5);
+  --lg-tint-menu: rgb(250 252 255 / 0.66);
+  --lg-tint-input: rgb(255 255 255 / 0.42);
+  --lg-tint-solid: #f6f8fb;
+  --lg-highlight: rgb(255 255 255 / 0.72);
+  --lg-edge: rgb(255 255 255 / 0.62);
+  --lg-hairline: rgb(22 30 44 / 0.1);
+  --lg-shade: rgb(22 30 44 / 0.08);
+  --lg-selected: linear-gradient(180deg, rgb(255 255 255 / 0.82), rgb(255 255 255 / 0.44));
+  --lg-shadow: 0 18px 46px rgb(18 26 42 / 0.16), 0 2px 8px rgb(18 26 42 / 0.07);
+  --lg-shadow-lifted: 0 28px 70px rgb(18 26 42 / 0.22), 0 4px 12px rgb(18 26 42 / 0.09);
+  --lg-lens-shadow: 0 -1px 2px rgb(255 255 255 / 0.85), 0 1px 1px rgb(20 28 44 / 0.08), 0 2px 6px rgb(20 28 44 / 0.1);
+  /* 边缘受光强度。上游两层分别是 0.2 / 1；浅色下提一档，玻璃边才咬得住这层光幕。 */
+  --lg-rim-opacity: 0.5;
+  --lg-rim-opacity-strong: 1;
+}
+
+html:root.dark[data-appearance='liquid-glass'][data-accent] {
+  --background: rgb(18 21 28 / 0.42);
+  --foreground: #eef0f4;
+  --card: rgb(22 26 34 / 0.6);
+  --card-foreground: #eef0f4;
+  --popover: rgb(24 28 37 / 0.74);
+  --popover-foreground: #eef0f4;
+  --primary-foreground: #0d1620;
+  --secondary: rgb(34 38 47 / 0.6);
+  --secondary-foreground: #e2e5ec;
+  --muted: rgb(30 34 42 / 0.52);
+  --muted-foreground: #a7adb9;
+  --accent: color-mix(in srgb, var(--lg-accent) 18%, rgb(34 38 47 / 0.5));
+  --accent-foreground: var(--lg-accent);
+  --border: rgb(255 255 255 / 0.12);
+  --input: rgb(14 17 23 / 0.5);
+  --destructive: #ffa1ac;
+  --destructive-foreground: #350912;
+
+  --lg-canvas-base: #0c0e13;
+  --lg-canvas-tint: linear-gradient(158deg, #14161d, #0d0f15 48%, #150f19);
+  --lg-window-shadow: 0 24px 70px rgb(0 0 0 / 0.6);
+
+  --lg-tint: rgb(16 19 26 / 0.3);
+  --lg-tint-regular: rgb(16 19 26 / 0.56);
+  --lg-tint-menu: rgb(18 21 29 / 0.72);
+  --lg-tint-input: rgb(12 15 21 / 0.44);
+  --lg-tint-solid: #171a21;
+  --lg-highlight: rgb(255 255 255 / 0.22);
+  --lg-edge: rgb(255 255 255 / 0.18);
+  --lg-hairline: rgb(0 0 0 / 0.5);
+  --lg-shade: rgb(0 0 0 / 0.3);
+  --lg-selected: linear-gradient(180deg, rgb(255 255 255 / 0.18), rgb(255 255 255 / 0.06));
+  --lg-shadow: 0 18px 46px rgb(0 0 0 / 0.5), 0 2px 8px rgb(0 0 0 / 0.32);
+  --lg-shadow-lifted: 0 28px 70px rgb(0 0 0 / 0.62), 0 4px 12px rgb(0 0 0 / 0.38);
+  --lg-lens-shadow: 0 -1px 2px rgb(255 255 255 / 0.12), 0 1px 2px rgb(0 0 0 / 0.24), 0 2px 6px rgb(0 0 0 / 0.24);
+  --lg-rim-opacity: 1;
+  --lg-rim-opacity-strong: 1;
+
+  /* 深色首帧兜底（银盐·深色）。 */
+  --lg-accent: #7cc2ff;
+  --lg-accent-from: #3d9bff;
+  --lg-accent-to: #7a6bff;
+  --lg-glow: rgb(61 155 255 / 0.32);
+  --lg-rim-tint: rgb(255 255 255 / 0.5);
+  --lg-aurora-1: rgb(10 132 255 / 0.55);
+  --lg-aurora-2: rgb(120 90 255 / 0.45);
+  --lg-aurora-3: rgb(255 55 95 / 0.3);
+}
+
+/* 字体：玻璃上不用衬线，界面文字统一无衬线；正文标题仍保留品牌衬线。 */
+[data-appearance='liquid-glass'] body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI Variable', 'Segoe UI', 'Montserrat', 'Microsoft YaHei', sans-serif;
+}
+[data-appearance='liquid-glass']
+  :is(.desktop-sidebar, .desktop-page-header, .desktop-material-toolbar, .desktop-settings-page)
+  :is(h1, h2, h3, h4, button, input, select, textarea, label) {
+  font-family: inherit;
+  letter-spacing: 0;
+}
+
+/* ══ 背景光幕 ═══════════════════════════════════════════════════════════
+   窗口根元素画光幕：底色 + 缓慢流动的光源 + 颗粒。光源放在 ::before 上是为了
+   能动 —— 直接动 background-image 的多层渐变需要放大贴图才能产生位移空间，
+   而位移贴图只能覆盖容器（百分比按「贴图减去容器」折算）。移动伪元素更省：
+   它在最底层、又被玻璃模糊，肉眼只看到光在缓慢游动。 */
+/* 文档画布必须自己是不透明的：--background 现在是半透明，body 的底色会按规范
+   上交给根画布，那样窗口背后就空了。光幕由窗口根元素绘制，这里只兜住最底下那层。 */
+html:root[data-appearance='liquid-glass'] {
+  background-color: var(--lg-canvas-base);
+}
+[data-appearance='liquid-glass'] .integrated-window-frame {
+  position: relative;
+  border-color: var(--lg-edge);
+  background-color: var(--lg-canvas-base);
+  background-image: var(--lg-canvas-tint);
+  box-shadow: var(--lg-window-shadow);
+}
+[data-appearance='liquid-glass'] .integrated-window-frame::before {
+  content: '';
+  position: absolute;
+  inset: -22%;
+  z-index: 0;
+  pointer-events: none;
+  background-image: var(--lg-aurora-image);
+  animation: lg-drift 44s ease-in-out infinite alternate;
+  will-change: transform;
+}
+[data-appearance='liquid-glass'] .integrated-window-frame::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: var(--lg-grain);
+  background-repeat: repeat;
+  opacity: var(--lg-grain-opacity);
+  mix-blend-mode: soft-light;
+}
+/* 「中性」背景 = 同一套玻璃材质，只是把光源摘掉，剩一层平整的中性底。 */
+[data-appearance='liquid-glass'][data-glass-canvas='neutral'] .integrated-window-frame::before {
+  display: none;
+}
+
+@keyframes lg-drift {
+  0% { transform: translate3d(-3%, -2%, 0) scale(1.02); }
+  50% { transform: translate3d(2%, 3%, 0) scale(1.08); }
+  100% { transform: translate3d(4%, -1%, 0) scale(1.04); }
+}
+
+/* ══ 结构层：让光幕透上来 ═══════════════════════════════════════════════
+   这几层原本各自有不透明底色（相邻 GPU 层看不穿彼此），新主题把底色交给玻璃，
+   于是必须透明：底色若留着，会盖住以 z-index:-1 贴在它们内侧的折射层。 */
+[data-appearance='liquid-glass'] :is(.desktop-window-body, .desktop-admin-layout, .desktop-content) {
+  background-color: transparent;
+}
+
+/* ══ 玻璃配方 ═══════════════════════════════════════════════════════════ */
+
+/* 材质移植：内容层。上游把它锁成白色 20px system-ui 并加文字投影，
+   这里交给上下文继承，颜色跟随主题 token。 */
+.liquid-glass {
+  position: relative;
+}
+.liquid-glass__content {
+  position: relative;
+  z-index: 1;
+  color: var(--foreground);
+  min-width: 0;
+}
+.liquid-glass[data-over-light='true'] .liquid-glass__content {
+  color: #fff;
+  text-shadow: 0 2px 12px rgb(0 0 0 / 0.4);
+}
+/* 折射层：底色与投影按材质给，折射/模糊由组件的行内样式提供。 */
+.liquid-glass__box {
+  background-color: var(--lg-tint);
+  box-shadow: var(--lg-shadow), inset 0 1px 0 var(--lg-highlight);
+  color: var(--foreground);
+}
+.liquid-glass[data-material='regular'] .liquid-glass__box {
+  background-color: var(--lg-tint-regular);
+  box-shadow: var(--lg-shadow), inset 0 1px 0 var(--lg-highlight);
+}
+.liquid-glass[data-over-light='true'] .liquid-glass__box {
+  box-shadow: 0 16px 70px rgb(0 0 0 / 0.45), inset 0 1px 0 var(--lg-highlight);
+}
+/* 边缘受光的两层渐变在组件里按指针角度实时写入，这里只调整体强度。 */
+.liquid-glass__rim {
+  border-radius: inherit;
+}
+/* 铺满宿主的那一片：贴在宿主容器内侧，不参与命中测试，内容由宿主自己绘制。 */
+.liquid-glass--fill {
+  z-index: -1;
+  border-radius: inherit;
+}
+.liquid-glass--fill .liquid-glass__transform,
+.liquid-glass--fill .liquid-glass__box {
+  border-radius: inherit;
+}
+/* 指针悬停时给可点击的玻璃一个手型（上游同样只在 onClick 时加）。 */
+.liquid-glass[data-interactive='true'] .liquid-glass__box {
+  cursor: pointer;
+}
+
+/* ── 宿主容器 ───────────────────────────────────────────────────────
+   「有玻璃片在里面 → 宿主让出底色」是这层楼的唯一规则：玻璃片以 z-index:-1
+   贴在宿主的层叠上下文内侧，所以宿主自己不能有底色或底图，否则正好盖住它。
+   宿主底色常写在行内 style 上（那是经典外观的底色，删不得），因此必须
+   !important。加 <GlassBackdrop/> 就该拿到透明宿主，不需要额外类名。
+
+   注意这条不需要 position：.lg-sheet 负责定位，浮层（对话框、菜单）本来就是
+   fixed/absolute，已经有自己的层叠上下文。 */
+[data-appearance='liquid-glass'] :has(> .lg-backdrop) {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+/* 结构面：本来没有定位，给它一个层叠上下文，好让玻璃片只在这个面内参与层叠
+   （否则 z-index:-1 会一路逃到最近的外层上下文，被夹在中间的任何底色盖掉）。
+
+   **只在「本来没有 z-index」的结构面上加 .lg-sheet。** 这条 z-index:0 写在
+   无层级样式里，会盖掉 Tailwind 的 z-* 工具类；而已经带 z 值的元素（下拉菜单、
+   浮层按钮、fixed 居中弹窗）本来就是层叠上下文，玻璃片直接贴上去就对，不需要
+   这个类，加了反而会被降到 0 层。这类元素只需要一个 <GlassBackdrop/>：
+   宿主让出底色是无层级、无类名的 `:has(> .lg-backdrop)` 规则负责的。
+
+   目前唯一带 z 值的结构面是标题栏的 z-10，下面显式还原；以后再加请照做。 */
+[data-appearance='liquid-glass'] .lg-sheet {
+  position: relative;
+  z-index: 0;
+}
+[data-appearance='liquid-glass'] .desktop-title-bar.lg-sheet {
+  z-index: 10;
+}
+/* 没挂上 JS 材质时（关闭液态玻璃 / 降低透明度 / 不支持 backdrop-filter），
+   由 CSS 自己把面涂实，避免结构面塌成透明。 */
+[data-appearance='liquid-glass'] .lg-sheet:not(:has(> .lg-backdrop)) {
+  background-color: var(--lg-tint-regular) !important;
+  background-image: linear-gradient(180deg, var(--lg-highlight), transparent 60%) !important;
+  backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate));
+}
+
+/* ── 窗口标题栏 ───────────────────────────────────────────────────── */
+[data-appearance='liquid-glass'] .desktop-title-bar {
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: var(--muted-foreground);
+}
+[data-appearance='liquid-glass'] .desktop-title-bar::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--lg-hairline) 12%, var(--lg-hairline) 88%, transparent);
+  pointer-events: none;
+}
+[data-appearance='liquid-glass'] .desktop-title-bar .desktop-caption-button:hover {
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+[data-appearance='liquid-glass'] .desktop-title-bar :is([role='menu'], .desktop-menu-surface) {
+  border-radius: var(--lg-radius-panel);
+}
+
+/* ── 侧栏 ─────────────────────────────────────────────────────────── */
+[data-appearance='liquid-glass'] .desktop-sidebar {
+  border-color: var(--lg-hairline) !important;
+}
+[data-appearance='liquid-glass'] .desktop-nav-item {
+  position: relative;
+  z-index: 0;
+  min-height: 36px;
+  border-radius: var(--lg-radius-control);
+  transition: background-color 180ms, box-shadow 180ms, color 180ms;
+}
+[data-appearance='liquid-glass'] .desktop-nav-item:not([aria-current='page']):hover {
+  background: var(--lg-tint) !important;
+  opacity: 1;
+  box-shadow: inset 0 1px 0 var(--lg-highlight);
+}
+/* 选中项：一枚压出来的玻璃透镜——比周围亮、有投影和强调色受光。 */
+[data-appearance='liquid-glass'] :is(.desktop-nav-item[aria-current='page'], .desktop-settings-sidebar button[aria-current='page']) {
+  background: var(--lg-selected) !important;
+  color: var(--foreground) !important;
+  box-shadow:
+    var(--lg-lens-shadow),
+    inset 0 0 0 1px color-mix(in srgb, var(--lg-accent) 30%, var(--lg-edge)),
+    0 4px 16px color-mix(in srgb, var(--lg-accent) 22%, transparent);
+}
+[data-appearance='liquid-glass'] :is(.desktop-nav-item[aria-current='page'], .desktop-settings-sidebar button[aria-current='page']) > svg {
+  color: var(--lg-accent);
+}
+
+/* ── 页头与工具栏 ─────────────────────────────────────────────────── */
+[data-appearance='liquid-glass'] :is(.desktop-page-header, .desktop-material-toolbar) {
+  border-color: transparent !important;
+}
+[data-appearance='liquid-glass'] :is(.desktop-page-header, .desktop-material-toolbar)::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--lg-hairline) 8%, var(--lg-hairline) 92%, transparent);
+  pointer-events: none;
+}
+
+/* ── 按钮 ─────────────────────────────────────────────────────────── */
+.lg-button {
+  position: relative;
+  z-index: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--lg-radius-pill);
+  background: transparent;
+  color: var(--foreground);
+  font-size: var(--text-ui-sm, 0.8125rem);
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 160ms var(--lg-ease), color 160ms, opacity 160ms;
+}
+.lg-button__label {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.lg-button__glass {
+  border-radius: var(--lg-radius-pill);
+}
+.lg-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.lg-button:active:not(:disabled) {
+  transform: translateY(0) scale(0.985);
+}
+.lg-button:disabled,
+.lg-button[data-disabled] {
+  cursor: default;
+  opacity: 0.45;
+}
+.lg-button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+/* 主按钮：实色强调渐变盖在玻璃之上，再加一层强调色辉光。 */
+[data-appearance='liquid-glass'] .lg-button[data-variant='primary'] {
+  color: var(--primary-foreground);
+  background-color: var(--lg-accent);
+  background-image: var(--lg-accent-gradient);
+  box-shadow: var(--lg-shadow), 0 6px 20px var(--lg-glow), inset 0 1px 0 rgb(255 255 255 / 0.3);
+}
+[data-appearance='liquid-glass'] .lg-button[data-variant='primary'] .lg-button__glass,
+[data-appearance='liquid-glass'] .lg-button[data-variant='primary'] .liquid-glass__box {
+  background-color: transparent;
+}
+/* 经典外观下 LG 控件退化成普通描边按钮，不至于没有样子。 */
+.lg-button {
+  border-color: var(--border);
+}
+.lg-button:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+/* ── 浮动托盘 ─────────────────────────────────────────────────────── */
+.lg-dock__items {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.lg-dock__item {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted-foreground);
+  transition: background 160ms, color 160ms, box-shadow 160ms;
+}
+.lg-dock__item > img {
+  display: block;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+.lg-dock__item:hover {
+  background: var(--lg-tint);
+  color: var(--foreground);
+}
+.lg-dock__item[aria-pressed='true'] {
+  background-color: var(--lg-selected);
+  color: var(--foreground);
+  border-color: var(--lg-edge);
+  box-shadow: var(--lg-lens-shadow);
+}
+.lg-dock__item:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+
+/* ── 面板（GlassSurface）───────────────────────────────────────────── */
+.lg-surface {
+  color: var(--foreground);
+}
+.lg-surface > .liquid-glass__transform {
+  height: 100%;
+}
+
+/* ── 分段控件与其透镜 ─────────────────────────────────────────────── */
+[data-appearance='liquid-glass'] .desktop-segmented-tabs {
+  position: relative;
+  z-index: 0;
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: var(--lg-radius-pill);
+}
+[data-appearance='liquid-glass'] .desktop-segmented-tabs > button {
+  position: relative;
+  z-index: 1;
+  border-radius: var(--lg-radius-pill);
+  background: transparent !important;
+}
+[data-appearance='liquid-glass'] .desktop-segmented-tabs > button:hover {
+  background: var(--lg-tint) !important;
+}
+[data-appearance='liquid-glass'] .desktop-segmented-tabs > button:is([aria-checked='true'], [aria-selected='true']) {
+  background: transparent !important;
+  color: var(--foreground) !important;
+}
+.lg-lens {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background-color: var(--lg-selected);
+  border: 1px solid color-mix(in srgb, var(--lg-accent) 32%, var(--lg-edge));
+  box-shadow: var(--lg-lens-shadow), 0 2px 12px color-mix(in srgb, var(--lg-accent) 24%, transparent);
+}
+[data-appearance='liquid-glass'] .desktop-segmented-tabs > button > :not(.lg-lens) {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── 输入类控件：玻璃凹槽 ─────────────────────────────────────────── */
+[data-appearance='liquid-glass']
+  :is(
+    .desktop-settings-page input:not([type='checkbox']):not([type='radio']):not([type='range']),
+    .desktop-settings-page select,
+    .desktop-settings-page textarea,
+    .desktop-input,
+    .desktop-select-trigger
+  ) {
+  background: var(--lg-tint-input) !important;
+  backdrop-filter: blur(12px) saturate(1.5);
+  color: var(--foreground);
+  border-radius: var(--lg-radius-control);
+  border-color: var(--lg-edge) !important;
+  box-shadow: inset 0 1px 2px var(--lg-shade), inset 0 -1px 0 var(--lg-highlight);
+}
+[data-appearance='liquid-glass'] :is(.desktop-input, .desktop-settings-page input)::placeholder {
+  color: var(--muted-foreground);
+  opacity: 0.75;
+}
+[data-appearance='liquid-glass']
+  :is(.desktop-settings-page input, .desktop-settings-page select, .desktop-settings-page textarea, .desktop-input, .desktop-select-trigger):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ring) 60%, transparent);
+  outline-offset: 2px;
+}
+[data-appearance='liquid-glass'] .desktop-input:focus,
+[data-appearance='liquid-glass'] .desktop-select-trigger:focus-visible {
+  background: color-mix(in srgb, var(--lg-tint-input) 70%, #fff 30%) !important;
+}
+
+/* ── 开关 ─────────────────────────────────────────────────────────── */
+.appearance-switch {
+  position: relative;
+  appearance: none;
+  width: 40px;
+  height: 24px;
+  flex-shrink: 0;
+  margin: 0;
+  border: 1px solid var(--lg-edge);
+  border-radius: var(--lg-radius-pill);
+  background: var(--lg-tint-input);
+  box-shadow: inset 0 1px 3px var(--lg-shade);
+  cursor: pointer;
+  transition: background 180ms;
+}
+.appearance-switch::after {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  top: 2px;
+  left: 2px;
+  border-radius: 50%;
+  background: linear-gradient(#fff, #e7e9ed);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.24), inset 0 1px 0 #fff;
+  transition: transform 180ms var(--lg-ease);
+}
+.appearance-switch:checked {
+  background-color: var(--lg-accent);
+  background-image: var(--lg-accent-gradient);
+  border-color: transparent;
+  box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.12), 0 2px 10px var(--lg-glow);
+}
+.appearance-switch:checked::after {
+  transform: translateX(16px);
+}
+
+/* ── 滑杆 ─────────────────────────────────────────────────────────── */
+.appearance-range {
+  appearance: none;
+  width: 150px;
+  max-width: 100%;
+  height: 6px;
+  border-radius: var(--lg-radius-pill);
+  background-color: var(--lg-tint-input);
+  background-image: linear-gradient(90deg, var(--lg-accent-from), var(--lg-accent-to));
+  background-size: var(--lg-range-fill, 50%) 100%;
+  background-repeat: no-repeat;
+  box-shadow: inset 0 1px 3px var(--lg-shade);
+  cursor: pointer;
+}
+.appearance-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.32), inset 0 1px 0 #fff, 0 0 0 1px rgb(0 0 0 / 0.06);
+}
+.appearance-range:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+
+/* ── 下拉 / 菜单 / 右键菜单 / 浮层 ───────────────────────────────────
+   这些是最能体现液态玻璃的地方：小块、边缘长、正好露出色散。挂上 JS 材质的
+   由 <GlassBackdrop material="regular"/> 提供折射，没挂的用下面的兜底。 */
+[data-appearance='liquid-glass']
+  :is(
+    .desktop-menu-surface,
+    .desktop-sidebar [role='menu'],
+    .desktop-title-bar [role='menu'],
+    .desktop-dialog-surface,
+    .desktop-toast,
+    .bg-popover.shadow-2xl,
+    .bg-background.shadow-2xl,
+    .bg-background.shadow-xl,
+    .bg-card.shadow-2xl
+  ):not(:has(> .lg-backdrop)) {
+  background-color: var(--lg-tint-menu) !important;
+  backdrop-filter: blur(20px) saturate(1.7);
+  border-color: var(--lg-edge) !important;
+  box-shadow: var(--lg-shadow-lifted), inset 0 1px 0 var(--lg-highlight) !important;
+  border-radius: var(--lg-radius-panel);
+}
+[data-appearance='liquid-glass'] .bg-popover:not(.desktop-menu-surface):not(.desktop-dialog-surface):not(:has(> .lg-backdrop)) {
+  background-color: var(--lg-tint-menu) !important;
+  backdrop-filter: blur(18px) saturate(1.6);
+  border-color: var(--lg-edge) !important;
+  box-shadow: var(--lg-shadow), inset 0 1px 0 var(--lg-highlight) !important;
+}
+[data-appearance='liquid-glass'] .desktop-menu-surface {
+  border-radius: var(--lg-radius-panel);
+}
+/* 遮罩：柔化弹窗背后的高对比画面。 */
+[data-appearance='liquid-glass'] :is([class*='bg-black/'], [class*='bg-background/'])[class*='inset-0'] {
+  backdrop-filter: blur(10px) saturate(1.2);
+}
+[data-appearance='liquid-glass'] .desktop-toaster .desktop-toast {
+  border-left-width: 1px;
+  border-radius: var(--lg-radius-panel);
+}
+
+/* ── 设置浮层 ─────────────────────────────────────────────────────── */
+[data-appearance='liquid-glass'] .desktop-settings-surface {
+  border-color: var(--lg-edge) !important;
+  box-shadow: var(--lg-shadow-lifted), inset 0 1px 0 var(--lg-highlight) !important;
+  border-radius: var(--lg-radius-panel);
+  overflow: hidden;
+}
+/* 设置面板内的分组栏：面板本身已经是玻璃，这里只压一层薄色让栏与正文分开。
+   再叠一次 backdrop-filter 会变成「玻璃上的玻璃」，既浑又白付一份 GPU 开销。 */
+[data-appearance='liquid-glass'] .desktop-settings-sidebar {
+  background-color: color-mix(in srgb, var(--lg-tint) 55%, transparent) !important;
+  border-color: var(--lg-hairline) !important;
+}
+/* 设置项之间的分隔靠发丝线，不再用整块卡片，避免玻璃叠玻璃发灰。 */
+[data-appearance='liquid-glass'] .desktop-settings-section {
+  border: 0;
+  border-radius: 0;
+  padding: 0 0 22px;
+  border-bottom: 1px solid var(--lg-hairline);
+  background: transparent !important;
+}
+[data-appearance='liquid-glass'] .desktop-settings-section:last-child {
+  border-bottom: 0;
+}
+[data-appearance='liquid-glass'] .desktop-settings-section h3 {
+  font-weight: 600;
+}
+[data-appearance='liquid-glass'] :is(.desktop-settings-primary, .desktop-button[data-variant='default']) {
+  background-image: var(--lg-accent-gradient);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.28), 0 6px 18px var(--lg-glow);
+}
+[data-appearance='liquid-glass'] :is(.desktop-settings-outline, .desktop-button[data-variant='outline']) {
+  background-color: var(--lg-tint);
+  border-color: var(--lg-edge);
+  backdrop-filter: blur(10px) saturate(1.5);
+  box-shadow: var(--lg-shadow), inset 0 1px 0 var(--lg-highlight);
+}
+[data-appearance='liquid-glass'] :is(.desktop-button, .desktop-settings-primary, .desktop-settings-outline) {
+  border-radius: var(--lg-radius-pill);
+  transition: background-color 160ms, box-shadow 160ms, transform 160ms var(--lg-ease);
+}
+/* 各页面用内联 style 写死的 --primary 实色主按钮：这里在其上叠一层强调渐变。 */
+[data-appearance='liquid-glass'] :is(button, a)[style*='background-color: var(--primary)'] {
+  background-image: var(--lg-accent-gradient);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22), 0 6px 18px var(--lg-glow);
+}
+
+/* ── 资源库浮动选中栏 ─────────────────────────────────────────────── */
+[data-appearance='liquid-glass'] .lg-selection-bar {
+  position: relative;
+  z-index: 0;
+  border-color: transparent !important;
+  background-color: transparent !important;
+  border-radius: var(--lg-radius-pill);
+  box-shadow: none;
+}
+[data-appearance='liquid-glass'] .lg-selection-bar > :not(.liquid-glass--fill):not(.lg-backdrop) {
+  position: relative;
+  z-index: 1;
+}
+
+/* ══ 全应用覆盖：逐场景定位 ═════════════════════════════════════════════
+   上面那层 token 已经让每个表面有了玻璃的**颜色**；这里补上**结构**——模糊、
+   描边、受光、投影。分场景写，是因为各场景的取舍不同：弹窗要厚（内容直接压在
+   上面）、菜单要亮（小块、边缘长、最能露色散）、照片与媒体查看器必须中性
+   （颜色保真优先于材质）、照片网格不能逐个开模糊（一屏上百个瓦片会卡住滚动）。 */
+
+/* 1. 遮罩。液态玻璃用「浅雾」而不是黑幕：背后的画面柔化后仍可辨认。
+      只处理全屏弹窗的遮罩（fixed inset-0 的子元素），页面上压在缩略图上的
+      小遮罩只改颜色、不加模糊——模糊会把底下的照片一起糊掉。 */
+[data-appearance='liquid-glass'] [class*='fixed'][class*='inset-0'] > [class*='bg-black/'][class*='inset-0']:not([class*='bg-black/9']),
+[data-appearance='liquid-glass'] [class*='fixed'][class*='inset-0'] > [class*='bg-background/'][class*='inset-0'] {
+  background-color: var(--lg-scrim) !important;
+  backdrop-filter: blur(9px) saturate(1.15);
+}
+[data-appearance='liquid-glass'] :is([class*='absolute'][class*='inset-0']) > [class*='bg-black/']:not([class*='bg-black/9']) {
+  background-color: color-mix(in srgb, var(--lg-scrim) 70%, transparent) !important;
+}
+
+/* 2. 弹窗面板：遮罩下的那一层。已经挂了 JS 材质的由折射负责（下方 :not(:has)
+      把这条排除掉）；没挂上的在这里拿到模糊 + 描边 + 受光 + 抬升的投影。 */
+[data-appearance='liquid-glass']
+  :is(
+    [class*='fixed'][class*='inset-0'] > :is(.bg-popover, .bg-card, .bg-background, .bg-muted, .bg-secondary),
+    [role='dialog']:is(.bg-popover, .bg-card, .bg-background, .bg-muted, .bg-secondary)
+  ):not(:has(> .lg-backdrop)) {
+  backdrop-filter: blur(22px) saturate(1.7);
+  border-color: var(--lg-edge) !important;
+  box-shadow: var(--lg-shadow-lifted), inset 0 1px 0 var(--lg-highlight) !important;
+  border-radius: var(--lg-radius-panel);
+}
+
+/* 3. 卡片与浮层：只加一道上缘受光，不加模糊。 */
+[data-appearance='liquid-glass']
+  :is(.bg-card, .bg-popover):is(.shadow-lg, .shadow-xl, .shadow-2xl) {
+  box-shadow: var(--lg-shadow), inset 0 1px 0 var(--lg-highlight);
+  border-color: var(--lg-edge);
+}
+
+/* 4. 表单控件：显式用了 --input 底色的那一层加模糊（免费的玻璃凹槽感）。
+      刻意不写裸 input/select/textarea：仓库里有无边框、透明底的搜索框，
+      统一加边框会把它们改坏。 */
+[data-appearance='liquid-glass'] .bg-input {
+  backdrop-filter: blur(10px) saturate(1.4);
+  box-shadow: inset 0 1px 2px var(--lg-shade);
+}
+/* 原生勾选/单选框/进度条跟随强调色。 */
+[data-appearance='liquid-glass']
+  :is(input[type='checkbox'], input[type='radio'], input[type='range'], progress) {
+  accent-color: var(--lg-accent);
+}
+
+/* 5. 滚动条：液态玻璃下用半透明白/黑，不再是实心灰。 */
+[data-appearance='liquid-glass'] ::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--foreground) 22%, transparent);
+  border-radius: 999px;
+}
+[data-appearance='liquid-glass'] ::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--foreground) 34%, transparent);
+}
+
+/* 6. 印刷工作台：台面是磨砂玻璃，纸是纸上唯一纯白的物体（bg-white 不在
+      token 里，因此不受主题影响，保持真实白）。 */
+[data-appearance='liquid-glass'] .zine-desk {
+  background-color: color-mix(in srgb, var(--lg-tint) 60%, transparent);
+  background-image: radial-gradient(color-mix(in srgb, var(--foreground) 14%, transparent) 1px, transparent 1px);
+  backdrop-filter: blur(16px) saturate(1.4);
+}
+
+/* 7. 沉浸式编辑器：整屏铺开，用一块磨砂玻璃承接，书写/排版时背后只有缓慢
+      流动的光，不再有锐利的光斑。 */
+[data-appearance='liquid-glass'] [class*='fixed'][class*='inset-0'][class*='bg-background'] {
+  backdrop-filter: blur(24px) saturate(1.5);
+}
+
+/* 8. 下拉、菜单、命令面板：小块、边缘长，是色散最明显的地方。
+      （弹窗在 2 里另有一套更厚的配方。这里排除 fixed 的，避免叠加两次模糊。） */
+[data-appearance='liquid-glass']
+  :is(.bg-popover, [role='menu'], [role='listbox'])
+  :not([class*='fixed']):not(.desktop-dialog-surface):not(:has(> .lg-backdrop)):not(.lg-button) {
+  backdrop-filter: blur(18px) saturate(1.6);
+  border-color: var(--lg-edge) !important;
+  box-shadow: var(--lg-shadow), inset 0 1px 0 var(--lg-highlight) !important;
+  border-radius: var(--lg-radius-panel);
+}
+/* 菜单项在玻璃上要更亮一点的选中态，深色下尤其明显。 */
+[data-appearance='liquid-glass'] :is([role='menu'], [role='listbox']) :is([role='menuitem'], [role='menuitemradio'], [role='option']):hover {
+  background-color: var(--lg-tint) !important;
+}
+
+/* 7. 颜色保真的表面：照片/视频查看器、编辑器画布、缩略图。
+     这些地方中性优先——材质不该改动作者看到的颜色。同时防止上面的规则
+     误伤：查看器是全屏 bg-black/95（已按 /9 排除），这里再显式钉死一次。 */
+[data-appearance='liquid-glass'] :is(.photo-viewer, .media-viewer, [data-color-critical]) {
+  background-color: #000 !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+/* ── 外观设置面板 ─────────────────────────────────────────────────── */
+.appearance-settings {
+  max-width: 900px;
+  margin-inline: auto;
+  container-type: inline-size;
+}
+.appearance-group {
+  margin-top: 26px;
+}
+.appearance-group > h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.appearance-group > p {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+  margin-bottom: 12px;
+}
+.appearance-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding-block: 13px;
+  border-bottom: 1px solid var(--lg-hairline);
+}
+.appearance-row:last-child {
+  border-bottom: 0;
+}
+.appearance-label {
+  font-size: 13px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+.appearance-row > .desktop-segmented-tabs {
+  width: 310px;
+  max-width: 100%;
+}
+.appearance-hint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  max-width: 300px;
+}
+.appearance-note {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+  margin-top: 10px;
+}
+.appearance-presets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+.appearance-preset {
+  position: relative;
+  display: block;
+  cursor: pointer;
+  min-width: 0;
+}
+.appearance-preset > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.appearance-preset-frame {
+  display: grid;
+  grid-template-columns: 24% 1fr;
+  height: 104px;
+  padding: 9px;
+  border: 2px solid var(--border);
+  border-radius: var(--lg-radius-panel);
+  background: var(--muted);
+  overflow: hidden;
+  gap: 7px;
+}
+/* 预览缩略：左侧栏与主区都是玻璃面，底下透出各自的光幕。 */
+.appearance-preset-frame > span {
+  padding: 9px 6px;
+  border-radius: 7px;
+  box-shadow: inset 1px 1px 0 var(--lg-highlight);
+}
+.appearance-preset[data-preset='liquid-glass'] .appearance-preset-frame {
+  border-color: transparent;
+  background-color: #eceff5;
+  background-image:
+    radial-gradient(120% 90% at 12% -8%, rgb(0 122 255 / 0.5), transparent 66%),
+    radial-gradient(100% 80% at 92% 4%, rgb(122 92 255 / 0.46), transparent 64%),
+    radial-gradient(120% 90% at 70% 108%, rgb(255 92 168 / 0.36), transparent 68%),
+    linear-gradient(158deg, #f8fafd, #e9eef6 46%, #f4edf6);
+}
+.appearance-preset[data-preset='liquid-glass'] .appearance-preset-frame > span {
+  background-color: rgb(255 255 255 / 0.44);
+  backdrop-filter: blur(6px);
+}
+.appearance-preset[data-preset='classic'] .appearance-preset-frame {
+  background: var(--card);
+}
+.appearance-preset[data-preset='classic'] .appearance-preset-frame > span {
+  background-color: var(--muted);
+  box-shadow: none;
+}
+.appearance-preset-frame i {
+  display: block;
+  height: 5px;
+  margin-bottom: 8px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--foreground) 20%, transparent);
+}
+.appearance-preset-frame i:first-child {
+  background: var(--lg-accent, var(--primary));
+}
+.appearance-preset > input:checked + .appearance-preset-frame {
+  border-color: var(--lg-accent, var(--primary));
+}
+.appearance-preset > input:focus-visible + .appearance-preset-frame {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+.appearance-preset-name {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 13px;
+  padding-top: 9px;
+}
+.appearance-preset-name > svg {
+  color: var(--lg-accent, var(--primary));
+}
+.appearance-swatch-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 3px;
+}
+.appearance-swatch {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 3px solid var(--card);
+  border-radius: 50%;
+  outline: 1px solid var(--border);
+  cursor: pointer;
+}
+.appearance-swatch[aria-pressed='true'] {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+[data-appearance='liquid-glass'] .appearance-swatch[aria-pressed='true'] {
+  outline-color: transparent;
+  box-shadow: 0 0 0 2px var(--card), 0 0 0 4px color-mix(in srgb, var(--lg-accent) 65%, transparent), 0 4px 14px var(--lg-glow);
+}
+.appearance-select {
+  height: 32px;
+  width: 190px;
+  max-width: 100%;
+  padding-inline: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--lg-radius-control);
+  background: var(--input);
+  color: var(--foreground);
+  font-size: 12px;
+}
+[data-appearance='liquid-glass'] .appearance-select {
+  background: var(--lg-tint-input);
+  border-color: var(--lg-edge);
+  backdrop-filter: blur(12px) saturate(1.5);
+}
+
+/* ── 外观预览台 ─────────────────────────────────────────────────────
+   一块缩小的真实画布：同样的光幕，同样挂在 JS 材质上的玻璃，用来看参数调完
+   之后整个应用长什么样。悬停时光幕与会动，所以玻璃的弹性、色散一眼可见。 */
+.appearance-specimen {
+  position: relative;
+  z-index: 0;
+  margin-top: 24px;
+  padding: 26px;
+  border-radius: var(--lg-radius-panel);
+  overflow: hidden;
+  background-color: var(--lg-canvas-base);
+  background-image: var(--lg-canvas-tint);
+}
+.appearance-specimen::before {
+  content: '';
+  position: absolute;
+  inset: -22%;
+  z-index: 0;
+  pointer-events: none;
+  background-image: var(--lg-aurora-image);
+}
+.appearance-specimen > * {
+  position: relative;
+  z-index: 1;
+}
+.appearance-specimen-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 18px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.appearance-specimen-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.appearance-specimen-panel {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+  overflow: visible;
+  border-radius: var(--lg-radius-panel);
+}
+.appearance-specimen-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13px;
+}
+.appearance-specimen-input.desktop-input {
+  width: 170px;
+  height: 34px;
+  padding: 0 10px;
+  font-family: inherit;
+}
+.appearance-specimen-select {
+  width: 170px;
+  min-width: 0;
+}
+.appearance-specimen-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 20px;
+}
+.appearance-specimen-selection {
+  display: flex;
+  justify-content: center;
+  margin-top: 20px;
+}
+.appearance-tuning-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 4px 32px;
+}
+.appearance-tuning {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-block: 12px;
+  border-bottom: 1px solid var(--lg-hairline);
+  font-size: 13px;
+}
+.appearance-tuning-value {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  min-width: 42px;
+  text-align: right;
+}
+
+/* ── 独立的外观预览页（theme-preview.html）──────────────────────────
+   整页就是应用真身：同一层窗口光幕 + 一块玻璃面板。滚动交给玻璃面板自己
+   （--lg-overflow），外层不外溢，否则光幕伪元素会把页面撑出滚动区。 */
+.theme-preview-page {
+  position: relative;
+  height: 100dvh;
+  overflow: hidden;
+  padding: 40px 24px;
+}
+.theme-preview-panel {
+  width: min(100%, 860px);
+  max-height: 100%;
+  margin-inline: auto;
+  --lg-overflow: auto;
+  border-radius: var(--lg-radius-panel);
+}
+.theme-preview-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.theme-preview-heading h1 {
+  font-family: inherit;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+@media (max-width: 640px) {
+  .theme-preview-page {
+    padding: 16px;
+  }
+  .theme-preview-panel {
+    padding: 18px;
+  }
+}
+@container (max-width: 560px) {
+  .appearance-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .appearance-row > .desktop-segmented-tabs {
+    width: 100%;
+  }
+  .appearance-specimen {
+    padding: 16px;
+  }
+}
+
+/* ══ 无障碍与降级 ═══════════════════════════════════════════════════════ */
+
+/* 降低透明度：材质组件已经整体关掉（GlassBackdrop 返回 null），这里把
+   结构面涂成实色，并把还没换掉的兜底面也一并转实。 */
+html:root[data-appearance='liquid-glass'][data-accent][data-reduce-transparency='true'] {
+  --lg-tint: var(--lg-tint-solid);
+  --lg-tint-regular: var(--lg-tint-solid);
+  --lg-tint-menu: var(--lg-tint-solid);
+  --lg-tint-input: var(--lg-tint-solid);
+}
+[data-reduce-transparency='true']
+  :is(
+    .lg-sheet,
+    .desktop-settings-surface,
+    .desktop-menu-surface,
+    [role='menu'],
+    .desktop-toast,
+    .desktop-input,
+    .desktop-select-trigger,
+    .desktop-settings-page input,
+    .desktop-settings-page select,
+    .desktop-settings-page textarea,
+    .appearance-select
+  ) {
+  backdrop-filter: none !important;
+}
+[data-reduce-transparency='true'] .integrated-window-frame::before {
+  animation: none;
+}
+
+/* 平台不支持 backdrop-filter：与降低透明度同样处理。 */
+@supports not (backdrop-filter: blur(2px)) {
+  html:root[data-appearance='liquid-glass'][data-accent] {
+    --lg-tint: var(--lg-tint-solid);
+    --lg-tint-regular: var(--lg-tint-solid);
+    --lg-tint-menu: var(--lg-tint-solid);
+    --lg-tint-input: var(--lg-tint-solid);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .integrated-window-frame::before,
+  .appearance-specimen::before {
+    animation: none;
+  }
+  :is(.lg-button, .lg-dock__item, .appearance-switch, .appearance-switch::after, .desktop-nav-item) {
+    transition: none;
+  }
+  .lg-button:hover:not(:disabled),
+  .lg-button:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .liquid-glass__rim,
+  .liquid-glass__over-light {
+    display: none !important;
+  }
+  .liquid-glass__box,
+  .lg-button {
+    border: 1px solid CanvasText;
+    background: Canvas !important;
+    color: CanvasText;
+  }
+  .appearance-switch {
+    appearance: auto;
+  }
+  .appearance-switch::after {
+    display: none;
+  }
+}
