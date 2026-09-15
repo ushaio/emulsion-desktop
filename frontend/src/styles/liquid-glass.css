@@ -1173,14 +1173,29 @@ html:root[data-appearance='liquid-glass'] {
 /* ══ 无障碍与降级 ═══════════════════════════════════════════════════════ */
 
 /* 降低透明度：材质组件已经整体关掉（GlassBackdrop 返回 null），这里把
-   结构面涂成实色，并把还没换掉的兜底面也一并转实。 */
+   结构面涂成实色，并把还没换掉的兜底面也一并转实。
+
+   **必须限定在液态玻璃外观。** 下面这条选择器里有个 .lg-sheet，而
+   `.desktop-sidebar` 恰好也带着 lg-sheet 类（两套外观共用同一个 aside）——
+   不限定的话，应用内的「减少透明效果」会越过材质边界，把经典外观侧栏毛玻璃
+   的 backdrop-filter 一起按掉；而经典一档里又看不到那个开关，表现就是
+   「毛玻璃开关是开的、侧栏却少了模糊」。经典外观的侧栏有自己的开关与降级
+   （index.css「经典外观：侧栏毛玻璃」那组，看的是 data-system-reduce-transparency）。
+   兄弟规则 [data-reduce-transparency] .integrated-window-frame::before 不必限定：
+   那层光幕本身只在 [data-appearance='liquid-glass'] 下绘制（见上方 209 行起），
+   经典外观下没有东西可动。 */
+
+/* 仅玻璃材质那半：把半透明的玻璃色本身换成实色，与下面「撤掉 backdrop-filter」
+   配对，才是完整的「转实」。它比本文件上面两处配色定义块
+   （html:root[...][data-accent]、html:root.dark[...][data-accent]）多一个属性
+   选择器，具体度更高，深浅两套都被覆盖，因此不需要 !important。 */
 html:root[data-appearance='liquid-glass'][data-accent][data-reduce-transparency='true'] {
   --lg-tint: var(--lg-tint-solid);
   --lg-tint-regular: var(--lg-tint-solid);
   --lg-tint-menu: var(--lg-tint-solid);
   --lg-tint-input: var(--lg-tint-solid);
 }
-[data-reduce-transparency='true']
+html:root[data-appearance='liquid-glass'][data-reduce-transparency='true']
   :is(
     .lg-sheet,
     .desktop-settings-surface,

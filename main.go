@@ -103,8 +103,26 @@ func main() {
 			app,
 		},
 		Windows: &windows.Options{
-			WebviewIsTransparent: false,
-			WindowIsTranslucent:  false,
+			// 窗口底交给 DWM 合成：经典外观的侧栏半透明面透上去，得到的是**真正的**
+			// 背景模糊 —— 由合成器做的，不是 CSS 的 backdrop-filter。
+			//
+			// 为什么必须走到窗口这一层：应用里侧栏与主区是并列的 flex 兄弟，内容永远
+			// 不从侧栏底下经过，所以侧栏背后只有窗口底。在纯白窗底上做 backdrop-filter，
+			// 实测模糊的独立贡献只有 1–5/255（等于装饰），看起来就是「一层主题色」而不是
+			// 毛玻璃。整窗透明 + 亚克力之后，侧栏背后变成被 DWM 模糊过的桌面。
+			//
+			// WebviewIsTransparent 会把 webview 的 DefaultBackgroundColor 的 alpha 强制
+			// 置 0（不看 BackgroundColour），于是 CSS 里 alpha=0 的地方就露出宿主窗口。
+			// 所以前端必须自己兜住窗口底：液态玻璃外观自带不透明的光幕
+			// （--lg-canvas-base），经典外观由 .desktop-content 铺实色，只有侧栏那一条
+			// 故意留空 —— 见 index.css「经典外观：侧栏毛玻璃」。
+			//
+			// BackdropType 需要 Windows 11 build 22621+；更早的系统 WindowIsTranslucent
+			// 会退回 BlurBehind（模糊仍在，只是较重）。两者都不可用时窗口依然透明，
+			// 只是没有模糊 —— 也就是「透明但没磨砂」，不会坏掉。
+			BackdropType:         windows.Acrylic,
+			WebviewIsTransparent: true,
+			WindowIsTranslucent:  true,
 			// Prevent Ctrl+wheel/keyboard zoom and touch pinch zoom from making the app feel like a browser.
 			IsZoomControlEnabled: false,
 			DisablePinchZoom:     true,

@@ -276,6 +276,195 @@
   --ring: #C2497A;
 }
 
+/* ── 经典外观：外观设置面板的材质 token ────────────────────────────
+   外观设置面板与它的开关（.appearance-row / .appearance-switch）是两套外观
+   共用的，而它们的描边、底色、投影都取自 --lg-* 材质 token —— 那套值只在
+   [data-appearance='liquid-glass'] 下定义。经典外观下这些引用整条失效：
+   面板分隔线消失、开关只剩一个浮着的圆钮。这里按经典配色的语义 token 补一
+   组等价物，两套外观下面板长得一样。
+   还有一处颜色差异：开关选中态取 --lg-accent，而它由 ThemeContext 按**玻璃
+   配色表**写在 <html> 行内（银盐是系统蓝 #0a63d6），经典外观下该用配色表里
+   的 --primary（银盐是近黑）。样式表要压过 <html> 上的行内值只能 !important。 */
+:root[data-appearance='classic'] {
+  --lg-edge: var(--border);
+  --lg-hairline: var(--border);
+  --lg-tint-input: var(--muted);
+  --lg-shade: rgb(0 0 0 / 0.06);
+  --lg-accent: var(--primary) !important;
+  --lg-accent-gradient: linear-gradient(135deg, var(--primary), var(--primary)) !important;
+  --lg-glow: transparent !important;
+}
+
+/* ── 经典外观：侧栏毛玻璃 ──────────────────────────────────────────
+   真毛玻璃的前提是**背后有东西可模糊**。这个应用里侧栏与主区是并列的 flex 兄弟，
+   内容永远不从侧栏底下经过，所以侧栏背后只有窗口底 —— 而窗口底（--background）
+   与侧栏实色（--card）几乎同色（樱花 #FCF9FA / #FBF7F8），还是一片平整的白。
+   在这种背板上做 backdrop-filter，实测模糊的独立贡献只有 1–5/255：等于装饰，
+   看上去就是「一层主题色」而不是玻璃。
+
+   所以模糊不在这里做，而是交给操作系统的 DWM 合成器：main.go 打开
+   BackdropType=Acrylic + WindowIsTranslucent + WebviewIsTransparent，整窗背后变成
+   被系统模糊过的**桌面**；CSS 只需把窗口底让开，让那层亚克力透上来。
+   这样也就完全不需要任何「主题色柔光」—— 那是拿颜色冒充模糊，正是观感不对的根源。
+
+   下面四条是一组，从外到内依次是 body → 窗口框 → 主区/侧栏；缺一条整条链路就断：
+   ⓪ body 底色转透明 —— Tailwind base 给 body 铺了 bg-background，它是**最外层**的
+      一块实色，不放开它，后面全透明也透不出亚克力。
+   ① .integrated-window-frame 底色转透明 —— 窗口底让给亚克力。
+      alpha 必须是 0：WebviewIsTransparent 会把 webview 的默认背景 alpha 强制成 0，
+      只有 HTML 里 alpha=0 的区域才会露出宿主窗口。
+   ② .desktop-content 同时铺实色 —— 否则每个功能页都会跟着半透明、整屏露出桌面。
+      ①与②是一对：只放开①不补②，是把整个应用变成毛玻璃，而不是只把侧栏。
+   ③ 侧栏底色半透明 + 次级文字加深一档 —— 亚克力透上来即为磨砂面。
+
+   ③ 里那半句是最容易漏的一件：侧栏正文原本用 --muted-foreground（樱花 #747273），
+   实色侧栏下对比度就只有 4.49（配色表自身的边界）；面板一旦半透明，同一个灰立刻
+   掉到 3.65，跌破 WCAG AA 的 4.5。**半透明面板必须配一套自己的前景色。**
+
+   浅色面使用 58% 覆盖率，让 DWM 的背景变化可见；深色面仍使用 76%，
+   避免浅色壁纸穿透后影响浅色文字的可读性。
+
+   开关写在外观设置 →「主题风格」的经典一档里，落到 <html data-sidebar-frosted>。
+   开关为 'false'、系统要求降低透明度、平台不支持 color-mix 时，一律回到改动前的
+   样子（窗口底与侧栏都用配色表原来的实色、文字也不加深），不留半截状态。
+   三条回退里，降低透明度那条多一个属性 → 具体度更高，顺序无关；@supports 那条要
+   覆盖的是等具体度的主规则，只能靠源顺序取胜，必须留在后面。 */
+:root[data-appearance='classic'][data-sidebar-frosted='true'] {
+  /* 侧栏内的次级文字色。混向 --foreground（对比度最大的那一端），因此明暗两套都
+     成立：浅色下文字变深、深色下文字变浅，两边都朝「更清楚」走。
+     必须在 <html> 这一级算 —— 此处 var(--muted-foreground) 还是配色表给的原始值。
+     若写在 .desktop-sidebar 上就成了自引用（--muted-foreground 引用自己），
+     CSS 判定为循环 → 整个变量失效，文字颜色会退回 initial。 */
+  --sidebar-frost-muted: color-mix(in srgb, var(--foreground) 62%, var(--muted-foreground));
+  /* 半透明面板的覆盖率。调它就是在「更透」与「深色壁纸下仍压得住字」之间取舍。 */
+  --sidebar-frost-surface: color-mix(in srgb, var(--card) 58%, transparent);
+}
+:root.dark[data-appearance='classic'][data-sidebar-frosted='true'] {
+  --sidebar-frost-surface: color-mix(in srgb, var(--card) 76%, transparent);
+}
+/* ⓪ body 也必须让开。Tailwind base 里 body 是 @apply bg-background —— 一块铺满
+   视口的实色，而它在窗口框**外层**：不放开这一层，①再透明也透不出亚克力。
+   这一层最容易漏 —— 只盯着窗口框会以为链路已经通畅了。 */
+:root[data-appearance='classic'][data-sidebar-frosted='true'] body {
+  background-color: transparent;
+}
+/* ① 窗口底让给 DWM 的亚克力。 */
+:root[data-appearance='classic'][data-sidebar-frosted='true'] .integrated-window-frame {
+  position: relative;
+  background-color: transparent;
+}
+/* 经典外观仍需要一层很克制的底部光场，才能让透明侧栏表现出“磨砂”而不是
+   一块被洗白的卡片。它只画在窗口底，不会污染主内容（主区有自己的实色背景），
+   也不依赖桌面壁纸或 DWM 是否可用。 */
+:root[data-appearance='classic'][data-sidebar-frosted='true'] .integrated-window-frame::before {
+  content: '';
+  position: absolute;
+  inset: -18%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(42% 34% at 8% 18%, color-mix(in srgb, var(--primary) 12%, transparent), transparent 74%),
+    radial-gradient(36% 32% at 28% 78%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 76%),
+    radial-gradient(34% 30% at 92% 16%, color-mix(in srgb, var(--primary) 9%, transparent), transparent 78%);
+  filter: blur(28px) saturate(1.08);
+  opacity: 0.9;
+}
+:root[data-appearance='classic'][data-sidebar-frosted='true'] .integrated-window-frame::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.2), transparent 22%, rgb(0 0 0 / 0.025));
+}
+/* body 本身保持透明，让上面的底部光场能进入侧栏的 backdrop 采样区域。 */
+:root[data-appearance='classic'][data-sidebar-frosted='true'] .desktop-window-body {
+  position: relative;
+  z-index: 0;
+  background-color: transparent;
+}
+/* ② 主区转实色。与①配对，缺了它整个应用都会透出桌面。 */
+:root[data-appearance='classic'][data-sidebar-frosted='true'] .desktop-content {
+  background-color: var(--background);
+}
+/* ③ 侧栏：半透明面透出亚克力，并把次级文字加深一档。 */
+:root[data-appearance='classic'][data-sidebar-frosted='true'] .desktop-sidebar {
+  position: relative;
+  z-index: 1;
+  background-color: var(--sidebar-frost-surface) !important;
+  background-image: linear-gradient(180deg, rgb(255 255 255 / 0.08), transparent 24%, rgb(0 0 0 / 0.02));
+  -webkit-backdrop-filter: blur(32px) saturate(1.25);
+  backdrop-filter: blur(32px) saturate(1.25);
+  box-shadow:
+    inset -1px 0 0 rgb(255 255 255 / 0.42),
+    inset 0 1px 0 rgb(255 255 255 / 0.3),
+    8px 0 24px rgb(22 28 42 / 0.06);
+  /* 侧栏内所有 var(--muted-foreground)（导航文字、图标、底部两项）自动换成加深版。
+     组件里的行内 style 写的也是 var(--muted-foreground)，它在**元素上**解析，所以
+     不需要 !important 去压行内值，也不会漏掉以后新增的调用点。 */
+  --muted-foreground: var(--sidebar-frost-muted);
+}
+/* 深色外观降低顶端白光、补一点内侧阴影，避免“磨砂”被看成发白的实色块。 */
+:root.dark[data-appearance='classic'][data-sidebar-frosted='true'] .integrated-window-frame::after {
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.08), transparent 24%, rgb(0 0 0 / 0.1));
+}
+:root.dark[data-appearance='classic'][data-sidebar-frosted='true'] .desktop-sidebar {
+  background-image: linear-gradient(180deg, rgb(255 255 255 / 0.08), transparent 24%, rgb(0 0 0 / 0.11));
+  box-shadow:
+    inset -1px 0 0 rgb(255 255 255 / 0.18),
+    inset 0 1px 0 rgb(255 255 255 / 0.14),
+    8px 0 24px rgb(0 0 0 / 0.2);
+}
+/* 系统要求降低透明度：body、窗口底与侧栏都回到配色表的实色，文字也不加深。
+   --muted-foreground: inherit 取的是父级（html）上配色表原本的值。 */
+:root[data-appearance='classic'][data-sidebar-frosted='true'][data-system-reduce-transparency='true'] body {
+  background-color: var(--background);
+}
+:root[data-appearance='classic'][data-sidebar-frosted='true'][data-system-reduce-transparency='true'] .integrated-window-frame {
+  background-color: var(--background);
+}
+:root[data-appearance='classic'][data-sidebar-frosted='true'][data-system-reduce-transparency='true'] .integrated-window-frame::before,
+:root[data-appearance='classic'][data-sidebar-frosted='true'][data-system-reduce-transparency='true'] .integrated-window-frame::after {
+  display: none;
+}
+:root[data-appearance='classic'][data-sidebar-frosted='true'][data-system-reduce-transparency='true'] .desktop-content {
+  background-color: transparent;
+}
+:root[data-appearance='classic'][data-sidebar-frosted='true'][data-system-reduce-transparency='true'] .desktop-sidebar {
+  background-color: var(--card) !important;
+  background-image: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+  --muted-foreground: inherit;
+}
+/* 平台不支持 color-mix：构建器给每条 color-mix 生成的「去掉混合」兜底会变成
+   **不透明的 --card** —— 侧栏会退化成一个实色块，虽不难看但已不是透明面，与开关
+   语义不符。索性按「整体不生效」处理，回到改动前的样子。 */
+@supports not (color: color-mix(in srgb, red, blue)) {
+  :root[data-appearance='classic'][data-sidebar-frosted='true'] body {
+    background-color: var(--background);
+  }
+  :root[data-appearance='classic'][data-sidebar-frosted='true'] .integrated-window-frame {
+    background-color: var(--background);
+  }
+  :root[data-appearance='classic'][data-sidebar-frosted='true'] .integrated-window-frame::before,
+  :root[data-appearance='classic'][data-sidebar-frosted='true'] .integrated-window-frame::after {
+    display: none;
+  }
+  :root[data-appearance='classic'][data-sidebar-frosted='true'] .desktop-content {
+    background-color: transparent;
+  }
+  :root[data-appearance='classic'][data-sidebar-frosted='true'] .desktop-sidebar {
+    background-color: var(--card) !important;
+    background-image: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+    --muted-foreground: inherit;
+  }
+}
+
 /* 深色模式下原生控件（滚动条、下拉、输入框等）跟随主题明暗 */
 :root { color-scheme: light; }
 .dark { color-scheme: dark; }
@@ -562,3 +751,343 @@ body.mo-immersive .desktop-title-bar,
 body.mo-fullscreen-preview .desktop-title-bar {
   display: none;
 }
+
+/* ── 微信公众号预览：平台排版规格（取证式复刻） ──────────────────────
+   唯一规格来源：
+     ① res.wx.qq.com/mmbizappmsg/zh_CN/htmledition/js/assets/
+        tencent_portfolio_light.mtwuki0w9fb3572c.css（light 主题）
+     ② 参考文章 mp.weixin.qq.com/s/4Op0SJZIUVRu-IIA_cae4Q 在
+        390×844（iPhone UA）与 1280×900 两种视口下的 getComputedStyle 实测
+   实测结论：手机版与 .pages_skin_pc 桌面版的排版数值完全一致，唯一差异是
+   .rich_media_area_primary_inner 的 max-width（桌面 677px）。因此本预览按
+   手机版（390px 宽）取值即可同时代表两端。
+   注释中的类名沿用微信原类名，便于逐条回查。
+   已登记的主动偏差（D1-D6）见 WechatPreviewModal.tsx 头注。 */
+
+/* .rich_media_area_primary{padding:var(--richMediaAreaPrimaryPaddingTop) var(--appmsgPageGap) 0}
+   --richMediaAreaPrimaryPaddingTop = --appmsgPageGap = 20px */
+.wechat-page {
+  min-height: 100%;
+  padding: 20px 20px 0;
+  background: #fff;
+}
+
+/* .rich_media_title{font-size:22px;line-height:1.4;margin-bottom:14px;font-weight:500}
+   color:var(--new-title-color) = rgba(0,0,0,.9)
+   注：iOS/Windows 客户端另有 .rich_media_title_ios / body.windows-title-bold
+   把字重抬到 700；此处取 iPhone UA 实测的 500。 */
+.wechat-title {
+  margin: 0 0 14px;
+  font-size: 22px;
+  line-height: 1.4;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.9);
+}
+
+/* .rich_media_meta_list{margin-bottom:22px;line-height:20px;font-size:0}
+   font-size:0 用于吞掉 inline-block 兄弟节点之间的空白，条目各自声明 15px */
+.wechat-meta-list {
+  margin: 0 0 22px;
+  font-size: 0;
+  line-height: 20px;
+  overflow-wrap: break-word;
+}
+
+/* .rich_media_meta{display:inline-block;vertical-align:middle;margin:0 10px 10px 0;font-size:15px} */
+.wechat-meta {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 10px 10px 0;
+  font-size: 15px;
+}
+
+/* .rich_media_meta_text{color:var(--weui-FG-2)} = rgba(0,0,0,.3) */
+.wechat-meta--text { color: rgba(0, 0, 0, 0.3); }
+
+/* .rich_media_meta_link{color:var(--weui-LINK)} = #576b95 */
+.wechat-meta--link { color: #576b95; }
+
+/* 「原创」徽章 = .rich_media_meta.icon_appmsg_tag.appmsg_title_tag
+   .icon_appmsg_tag{display:inline-block;vertical-align:middle;padding:0 4px;
+     font-size:12px;line-height:1.67;border-radius:2px;overflow:hidden;
+     text-overflow:ellipsis;white-space:nowrap;max-width:70%;letter-spacing:normal;
+     background:rgba(0,0,0,.05);color:rgba(0,0,0,.3)}
+   .rich_media_meta.appmsg_title_tag{margin-right:8px;overflow:visible}
+   ⚠ 参考页用的是基础变体（12px / 2px 圆角 / 灰底 / 无描边），不是
+   .icon_appmsg_tag.default 那个 15px 带 1px 描边的胶囊变体。 */
+.wechat-tag {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 8px 10px 0;
+  padding: 0 4px;
+  max-width: 70%;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.67;
+  letter-spacing: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.05);
+  color: rgba(0, 0, 0, 0.3);
+}
+
+/* ── 正文 .rich_media_content ─────────────────────────────────────
+   .rich_media_content{color:var(--new-content-color);font-size:var(--articleFontsize);
+     overflow:hidden;text-align:justify}
+   :root{--articleFontsize:17px}；--new-content-color = rgba(0,0,0,.9)
+   body{line-height:1.6;letter-spacing:.544px(=.034em@16px)}，正文内联 span 再声明
+   letter-spacing:.034em（17px 下实测 .578px）。 */
+.wechat-article-content {
+  overflow: hidden;
+  color: rgba(0, 0, 0, 0.9);
+  font-size: 17px;
+  line-height: 1.6;
+  letter-spacing: 0.034em;
+  text-align: justify;
+  overflow-wrap: break-word;
+  font-family: 'mp-quote', 'PingFang SC', system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Hiragino Sans GB', 'Microsoft YaHei UI', 'Microsoft YaHei', Arial, sans-serif;
+}
+
+/* .rich_media_content *{max-width:100%!important;box-sizing:border-box!important;
+     word-wrap:break-word!important} */
+.wechat-article-content * {
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  overflow-wrap: break-word !important;
+}
+
+/* .rich_media_content p{clear:both;min-height:1em}
+   .autoTypeSetting24psection>p / >section{margin-top:0;margin-bottom:24px}
+   参考页 #js_content 的 class 正是 autoTypeSetting24psection，正文块的 24px 节奏
+   即来自该规则。此处把 24px 施加到全部块级元素：我们的正文由 Milkdown 生成、不含
+   微信编辑器写入的内联样式，若只作用于直接子元素，嵌套块之间将完全没有间距（偏差 D2）。 */
+.wechat-article-content p {
+  clear: both;
+  min-height: 1em;
+  margin: 0 0 24px;
+}
+
+/* .rich_media_content:not(.old_list_style) .list-paddingleft-1{padding-left:2.2em} */
+.wechat-article-content :where(ul, ol) {
+  margin: 0 0 24px;
+  padding-left: 2.2em;
+}
+.wechat-article-content li { margin: 0; }
+.wechat-article-content li > p:last-child { margin-bottom: 0; }
+
+/* .rich_media_content img{height:auto!important}
+   参考页图片由内联 width/aspect-ratio 定宽、父级 text-align:center 居中；我们的图片
+   没有内联宽度，按微信编辑器默认的整栏宽度呈现（偏差 D3）。#f7f7f7 是微信图片占位底色。 */
+.wechat-article-content img {
+  display: block;
+  width: 100%;
+  height: auto !important;
+  margin: 0 auto;
+  border-radius: 0 !important;
+  background-color: #f7f7f7;
+}
+
+/* blockquote{padding-left:10px;border-left:none;position:relative;color:var(--weui-FG-1);
+     font-size:15px;padding-top:4px;margin:1em 0;text-indent:0}
+   blockquote:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;
+     border-radius:1.5px;background-color:rgba(0,0,0,.1)}
+   ⚠ 微信引用块没有左边框、没有底色；左侧竖条是 ::before 画的 1.5px 圆角条。 */
+.wechat-article-content blockquote {
+  position: relative;
+  margin: 1em 0;
+  padding: 4px 0 0 10px;
+  border: 0;
+  font-size: 15px;
+  text-indent: 0;
+  color: rgba(0, 0, 0, 0.55);
+  background: transparent;
+}
+.wechat-article-content blockquote::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  border-radius: 1.5px;
+  background-color: rgba(0, 0, 0, 0.1);
+}
+/* .blockquote_info{color:var(--weui-FG-2)} */
+.wechat-article-content .blockquote_info { color: rgba(0, 0, 0, 0.3); }
+
+/* 正文链接继承 --weui-LINK */
+.wechat-article-content a {
+  color: #576b95;
+  text-decoration: none;
+}
+
+/* 标题：平台 CSS 对 .rich_media_content 内的 h1-h6 没有任何规则，微信编辑器也不产出
+   语义标题（参考页正文 h1-h6 实测数量为 0）。唯一实测锚点是 <strong> 的 17px/700。
+   故 700 字重 + 17px 有实测依据，22/20/18 三级字号是为保留层级而作的推断值（偏差 D1）。 */
+.wechat-article-content :where(h1, h2, h3, h4, h5, h6) {
+  margin: 0 0 24px;
+  line-height: inherit;
+  font-weight: 700;
+  color: inherit;
+}
+.wechat-article-content h1 { font-size: 22px; }
+.wechat-article-content h2 { font-size: 20px; }
+.wechat-article-content h3 { font-size: 18px; }
+.wechat-article-content :where(h4, h5, h6) { font-size: 17px; }
+
+/* 代码块：平台无任何规则（微信编辑器不产出 pre/code）。保持克制——不引入微信没有的
+   底色/配色，仅把字号收到正文的 15px 并允许换行。 */
+.wechat-article-content pre {
+  margin: 0 0 24px;
+  padding: 0;
+  font-size: 15px;
+  white-space: pre-wrap;
+  background: transparent;
+}
+.wechat-article-content code { font-size: 0.88em; }
+
+/* 表格：平台无规则，只把 UA 默认边框换成微信的分隔线色 rgba(0,0,0,.1) */
+.wechat-article-content table {
+  margin: 0 0 24px;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+.wechat-article-content :where(th, td) {
+  padding: 4px 8px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+/* 分隔线：参考页作者手写 <section style="height:1px;background-color:rgb(160,160,160)"> */
+.wechat-article-content hr {
+  height: 1px;
+  margin: 0 0 24px;
+  border: 0;
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+/* 媒体卡片是应用侧组件（非微信元素），去圆角以贴合公众号的直角图片 */
+.wechat-article-content .milkdown-media-card { border-radius: 0; }
+
+/* ── 底部固定互动条 .bottom_bar_wrp ────────────────────────────────
+   .bottom_bar_wrp{position:fixed;left:0;right:0;bottom:0;display:flex;
+     box-sizing:border-box;z-index:499;background-color:var(--weui-BG-2)}
+   .bottom_bar_interaction{padding:8px 20px}（iOS 另有 padding-bottom:4px）
+   实测高度 60px = 1px 上边线 + 8 + 43 + 8。微信原值 border-top:.5px solid
+   var(--weui-FG-3)=rgba(0,0,0,.1)，此处取 1px（偏差 D4）。 */
+.wechat-bottom-bar {
+  flex: none;
+  height: 60px;
+  background: #fff;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
+.wechat-bottom-bar__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 100%;
+  padding: 8px 20px;
+}
+
+/* 账号条 #js_like_profile_bar / .wx_follow_context
+   .wx_follow_avatar{width:32px;height:32px;margin-right:8px;border-radius:100%;
+     background-color:var(--weui-FG-5)=rgba(0,0,0,.05)}
+   .wx_follow_nickname_normal_font{font-size:15px;font-weight:500;align-items:center} */
+.wechat-follow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+.wechat-follow__avatar {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  margin-right: 8px;
+  border-radius: 100%;
+  object-fit: cover;
+  background-color: rgba(0, 0, 0, 0.05);
+}
+.wechat-follow__name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 21px;
+  color: rgba(0, 0, 0, 0.9);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 互动按钮组 .interaction_bar__wrap / .interaction_bar
+   .interaction_bar{display:flex;justify-content:space-between;align-items:center}
+   .interaction_bar .sns_opr_btn_con{width:39px;margin-left:4px}；:first-child{margin-left:0}
+   .sns_opr_btn:before{display:block;width:24px;height:24px;margin:0 auto 1px}（图标 24×24）
+   按钮与标签实测 12px/18px、色 rgba(0,0,0,.9)；按钮高 43 = 24 + 1 + 18。 */
+.wechat-opr {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-left: 4px;
+}
+.wechat-opr__item {
+  width: 39px;
+  margin-left: 4px;
+}
+.wechat-opr__item:first-child { margin-left: 0; }
+.wechat-opr__btn {
+  display: inline-block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.9);
+  font-family: inherit;
+  font-size: 12px;
+  vertical-align: middle;
+}
+.wechat-opr__btn svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+  margin: 0 auto 1px;
+}
+.wechat-opr__label {
+  display: block;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+}
+
+/* body{padding-bottom:95px} —— 给固定底栏留白（实测 body 计算值 95px） */
+.wechat-page-bottom-gap { height: 95px; }
+
+/* ── 暗色：对齐微信 [data-weui-theme=dark] 取值 ──────────────────────
+   页面底 --weui-BG-2 = #191919；标题 --new-title-color = rgba(255,255,255,.8)；
+   正文 --new-content-color = rgba(255,255,255,.7)；次要文字 --weui-FG-2 = rgba(255,255,255,.3)；
+   链接 --weui-LINK = #7d90a9；引用块 --weui-FG-1 = rgba(255,255,255,.5)；
+   分隔线 --weui-FG-3 = rgba(255,255,255,.1)；标签底 rgba(255,255,255,.05)。
+   选择器挂在卡片根的 data-wechat-theme 上——镜像微信自身的 data-weui-theme 机制，
+   使预览配色与 app 主题解耦，且这一层可被独立验证。 */
+[data-wechat-theme='dark'] .wechat-page,
+[data-wechat-theme='dark'] .wechat-bottom-bar {
+  background: #191919;
+}
+[data-wechat-theme='dark'] .wechat-title { color: rgba(255, 255, 255, 0.8); }
+[data-wechat-theme='dark'] .wechat-meta--text { color: rgba(255, 255, 255, 0.3); }
+[data-wechat-theme='dark'] .wechat-meta--link { color: #7d90a9; }
+[data-wechat-theme='dark'] .wechat-tag {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.3);
+}
+[data-wechat-theme='dark'] .wechat-article-content { color: rgba(255, 255, 255, 0.7); }
+[data-wechat-theme='dark'] .wechat-article-content a { color: #7d90a9; }
+[data-wechat-theme='dark'] .wechat-article-content blockquote { color: rgba(255, 255, 255, 0.5); }
+[data-wechat-theme='dark'] .wechat-article-content blockquote::before { background-color: rgba(255, 255, 255, 0.1); }
+[data-wechat-theme='dark'] .wechat-article-content :where(th, td) { border-color: rgba(255, 255, 255, 0.1); }
+[data-wechat-theme='dark'] .wechat-article-content hr { background-color: rgba(255, 255, 255, 0.1); }
+[data-wechat-theme='dark'] .wechat-article-content img { background-color: rgba(255, 255, 255, 0.05); }
+[data-wechat-theme='dark'] .wechat-bottom-bar { border-top-color: rgba(255, 255, 255, 0.1); }
+[data-wechat-theme='dark'] .wechat-follow__avatar { background-color: rgba(255, 255, 255, 0.1); }
+[data-wechat-theme='dark'] .wechat-follow__name { color: rgba(255, 255, 255, 0.8); }
+[data-wechat-theme='dark'] .wechat-opr__btn { color: rgba(255, 255, 255, 0.8); }
