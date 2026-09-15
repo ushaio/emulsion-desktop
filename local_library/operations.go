@@ -94,9 +94,11 @@ func (m *Manager) ImportFiles(paths []string, destination string) ([]ImportResul
 	if err != nil {
 		return nil, err
 	}
-	if !validImportMode(preferences.ImportMode) {
-		return nil, newError(ErrImportModeNotConfigured, "首次导入前请选择复制到资源库或移动到资源库", nil)
-	}
+	// The "每次询问" dialog is a renderer concern: the frontend asks first and
+	// then calls this, so by now the mode is settled. Fall back to the stored
+	// default rather than refusing the import (which also covers the
+	// backend-initiated imports that never show a dialog).
+	importMode := preferences.EffectiveImportMode()
 	session, err := m.requireAvailableSession()
 	if err != nil {
 		return nil, err
@@ -145,7 +147,7 @@ func (m *Manager) ImportFiles(paths []string, destination string) ([]ImportResul
 		// watcher events so the application-managed operation is not indexed twice.
 		session.ignoreWatcherPath(destinationPath, 5*time.Second)
 		var transferErr error
-		if preferences.ImportMode == ImportModeCopy {
+		if importMode == ImportModeCopy {
 			transferErr = copyFileSafely(sourceAbs, destinationPath)
 		} else {
 			transferErr = moveFileSafely(sourceAbs, destinationPath)

@@ -54,6 +54,7 @@ import { RestoreFolderDialog } from '../dialogs/RestoreFolderDialog'
 import { useLocalLibraryStore } from '../store'
 import { isPhotoAsset } from '../types'
 import type { AssetFileOperationPlan, AssetPage, BackupOverview, BatchAssetOrganizationUpdate, FolderDeletionPreview, FolderFileOperationPlan, FolderItem, FolderProperties, FolderTrashEntry, LibrarySnapshot, LocalAsset, LocalAssetClip, LocalLibraryEvent, LocalLibraryImportMode, LocalTag, LocalCollection, CollectionGroup } from '../types'
+import { DEFAULT_IMPORT_MODE, effectiveImportMode, shouldAskImportMode } from '../types'
 import type { LocalLibraryCopy } from '../copy'
 
 interface Props {
@@ -145,6 +146,8 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
   const importBusyRef = useRef(false)
   const [pendingImportPaths, setPendingImportPaths] = useState<string[] | null>(null)
   const [pendingImportDestination, setPendingImportDestination] = useState<string | null>(null)
+  // 弹窗的初始选项：沿用上次确认的方式，从未选择过时用内置默认值。
+  const [pendingImportMode, setPendingImportMode] = useState<LocalLibraryImportMode>(DEFAULT_IMPORT_MODE)
   const activeAssetRequestsRef = useRef(0)
   const assetQueryRequestIdRef = useRef(0)
   const previewStatusOverridesRef = useRef(new Map<string, string>())
@@ -621,7 +624,9 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
     setImportBusy(true)
     try {
       const preferences = await localLibraryApi.preferences()
-      if (!preferences.importMode) {
+      // 「每次询问」开启时每次都弹窗让用户选择；关闭时直接用已保存的默认方式。
+      if (shouldAskImportMode(preferences)) {
+        setPendingImportMode(effectiveImportMode(preferences))
         setPendingImportPaths(paths)
         setPendingImportDestination(destinationFolder)
         return
@@ -635,14 +640,18 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
     }
   }, [folder, runImport])
 
-  const chooseImportMode = useCallback(async (mode: LocalLibraryImportMode) => {
+  /**
+   * 弹窗确认。remember 来自「不再询问」复选框：
+   * 勾选则把 askEveryTime 置为 false，设置页的开关随之自动关闭。
+   */
+  const confirmImportMode = useCallback(async (mode: LocalLibraryImportMode, remember: boolean) => {
     if (!pendingImportPaths?.length || importBusyRef.current) return
     const paths = pendingImportPaths
     const destinationFolder = pendingImportDestination ?? folder
     importBusyRef.current = true
     setImportBusy(true)
     try {
-      await localLibraryApi.setImportMode(mode)
+      await localLibraryApi.setImportChoice(mode, !remember)
       await runImport(paths, destinationFolder)
       setPendingImportPaths(null)
       setPendingImportDestination(null)
@@ -653,6 +662,11 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
       setImportBusy(false)
     }
   }, [folder, pendingImportDestination, pendingImportPaths, runImport])
+
+  const closeImportModeDialog = useCallback(() => {
+    setPendingImportPaths(null)
+    setPendingImportDestination(null)
+  }, [])
 
   const importPathsRef = useRef(importPaths)
   useEffect(() => {
@@ -1920,7 +1934,7 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
       {organizationEditor && <OrganizationEditorDialog target={organizationEditor} groups={collectionGroups} copy={copy} busy={organizationBusy} onClose={() => setOrganizationEditor(null)} onSubmit={(value) => void saveOrganization(value)} />}
       {organizationDelete && <DeleteOrganizationDialog copy={copy} busy={organizationBusy} title={organizationDelete.kind === 'tag' ? copy.deleteTagTitle : organizationDelete.kind === 'collection' ? copy.deleteCollectionTitle : copy.deleteCollectionGroupTitle} body={organizationDelete.kind === 'tag' ? copy.deleteTagBody : organizationDelete.kind === 'collection' ? copy.deleteCollectionBody : organizationDelete.nonEmpty ? copy.deleteCollectionGroupBody : copy.deleteEmptyCollectionGroupBody} dangerousLabel={organizationDelete.kind === 'group' && organizationDelete.nonEmpty ? copy.deleteGroupContents : copy.confirmPermanent} onClose={() => setOrganizationDelete(null)} onConfirm={() => void deleteOrganization(Boolean(organizationDelete.nonEmpty))} />}
       {pendingCollectionDrop && <AddToCollectionConfirmDialog assetCount={pendingCollectionDrop.assetIds.length} collectionName={collections.find((item) => item.id === pendingCollectionDrop.collectionId)?.name ?? ''} copy={copy} busy={organizationBusy} onConfirm={() => void confirmCollectionDrop()} onClose={() => { if (!organizationBusy) setPendingCollectionDrop(null) }} />}
-      {pendingImportPaths && <ImportModeDialog copy={copy} busy={importBusy} onClose={() => { setPendingImportPaths(null); setPendingImportDestination(null) }} onChoose={chooseImportMode} />}
+      {pendingImportPaths && <ImportModeDialog copy={copy} initialMode={pendingImportMode} busy={importBusy} onClose={closeImportModeDialog} onConfirm={confirmImportMode} />}
       {removeMissingAsset && <RemoveMissingAssetDialog asset={removeMissingAsset} copy={copy} busy={missingMaintenanceBusy} onClose={() => setRemoveMissingAsset(null)} onConfirm={removeMissingRecord} />}
       {repairDialogOpen && <RepairThumbnailsDialog copy={copy} busy={repairBusy} onClose={() => { if (!repairBusy) setRepairDialogOpen(false) }} onMissing={() => void runThumbnailRepair('missing')} onRebuildAll={() => void runThumbnailRepair('all')} />}
       {deleteAsset && <DeleteAssetDialog asset={deleteAsset} copy={copy} busy={deleteBusy} onClose={() => setDeleteAsset(null)} onTrash={trashSelected} onRestore={() => void restoreAsset(deleteAsset)} onPermanent={permanentlyDelete} onDeleteCloud={deleteCloud} onDeleteCloudAndLocal={deleteCloudAndLocal} />}

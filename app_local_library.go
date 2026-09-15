@@ -303,8 +303,16 @@ func (a *App) GetLocalLibraryPreferences() (local_library.LocalLibraryPreference
 	return a.LocalLibrary.ImportPreferences()
 }
 
-func (a *App) SetLocalLibraryImportMode(mode string) (local_library.LocalLibraryPreferences, error) {
-	return a.LocalLibrary.SetImportMode(local_library.ImportMode(mode))
+// SetLocalLibraryImportChoice is called when the import dialog is confirmed.
+// askEveryTime is the "每次询问" switch, i.e. the inverse of the "不再询问"
+// checkbox: checking the checkbox passes false and turns the switch off.
+func (a *App) SetLocalLibraryImportChoice(mode string, askEveryTime bool) (local_library.LocalLibraryPreferences, error) {
+	return a.LocalLibrary.SetImportChoice(local_library.ImportMode(mode), askEveryTime)
+}
+
+// SetLocalLibraryAskEveryTime toggles the "每次询问" switch from the settings page.
+func (a *App) SetLocalLibraryAskEveryTime(askEveryTime bool) (local_library.LocalLibraryPreferences, error) {
+	return a.LocalLibrary.SetAskEveryTime(askEveryTime)
 }
 
 func (a *App) ImportLocalLibraryFiles(paths []string, destination string) ([]local_library.ImportResult, error) {

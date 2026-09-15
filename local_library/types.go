@@ -42,7 +42,6 @@ const (
 	ErrScanState                ErrorCode = "INVALID_SCAN_STATE"
 	ErrLibrarySuspended         ErrorCode = "LIBRARY_SUSPENDED"
 	ErrLibraryUpgradeRequired   ErrorCode = "LIBRARY_UPGRADE_REQUIRED"
-	ErrImportModeNotConfigured  ErrorCode = "IMPORT_MODE_NOT_CONFIGURED"
 	ErrInvalidImportMode        ErrorCode = "INVALID_IMPORT_MODE"
 	ErrTagNotFound              ErrorCode = "TAG_NOT_FOUND"
 	ErrCollectionNotFound       ErrorCode = "COLLECTION_NOT_FOUND"

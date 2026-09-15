@@ -59,7 +59,8 @@ import {
   ResumeLocalLibraryScan,
   SelectLocalLibraryFolder,
   SelectLocalLibraryImportFiles,
-  SetLocalLibraryImportMode,
+  SetLocalLibraryAskEveryTime,
+  SetLocalLibraryImportChoice,
   SetLocalAssetCollections,
   SetLocalAssetTags,
   StartLocalLibraryScan,
@@ -171,6 +172,18 @@ function normalizeUpgradeInfo(source: Record<string, unknown> | undefined): Libr
   }
 }
 
+/**
+ * 本地资源库导入偏好。askEveryTime 保持 undefined 语义（后端省略该字段），
+ * 交由 shouldAskImportMode 决定是否需要询问，避免把旧配置误判成「每次询问」。
+ */
+function normalizePreferences(source: { importMode?: string; askEveryTime?: boolean } | undefined): LocalLibraryPreferences {
+  const importMode = source?.importMode
+  return {
+    importMode: importMode === 'copy' || importMode === 'move' ? importMode : undefined,
+    askEveryTime: typeof source?.askEveryTime === 'boolean' ? source.askEveryTime : undefined,
+  }
+}
+
 function normalizeAssetUploadStatus(value: unknown, cloudPhotoId: unknown): AssetUploadStatus {
   if (value === 'uploaded' || value === 'pending-registration' || value === 'failed' || value === 'not-uploaded') {
     return value
@@ -237,13 +250,18 @@ export const localLibraryApi = {
   selectFolder: (title: string) => SelectLocalLibraryFolder(title),
   selectImportFiles: () => SelectLocalLibraryImportFiles(),
   async preferences(): Promise<LocalLibraryPreferences> {
-    const source = await GetLocalLibraryPreferences()
-    const importMode = source?.importMode
-    return { importMode: importMode === 'copy' || importMode === 'move' ? importMode : undefined }
+    return normalizePreferences(await GetLocalLibraryPreferences())
   },
-  async setImportMode(importMode: LocalLibraryImportMode): Promise<LocalLibraryPreferences> {
-    const source = await SetLocalLibraryImportMode(importMode)
-    return { importMode: source?.importMode === 'copy' || source?.importMode === 'move' ? source.importMode : undefined }
+  /** 设置页「每次询问」开关。 */
+  async setAskEveryTime(askEveryTime: boolean): Promise<LocalLibraryPreferences> {
+    return normalizePreferences(await SetLocalLibraryAskEveryTime(askEveryTime))
+  },
+  /**
+   * 导入弹窗确认。askEveryTime 即「每次询问」开关状态，等于「不再询问」复选框取反：
+   * 勾选复选框传 false，开关随之关闭。
+   */
+  async setImportChoice(importMode: LocalLibraryImportMode, askEveryTime: boolean): Promise<LocalLibraryPreferences> {
+    return normalizePreferences(await SetLocalLibraryImportChoice(importMode, askEveryTime))
   },
   async create(root: string, name: string) { return normalizeSnapshot(await CreateLocalLibrary(root, name)) },
   async initialize(root: string, name: string) { return normalizeSnapshot(await InitializeLocalLibrary(root, name)) },

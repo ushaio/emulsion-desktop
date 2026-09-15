@@ -1899,6 +1899,7 @@ export namespace local_library {
 	}
 	export class LocalLibraryPreferences {
 	    importMode?: string;
+	    askEveryTime?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new LocalLibraryPreferences(source);
@@ -1907,6 +1908,7 @@ export namespace local_library {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.importMode = source["importMode"];
+	        this.askEveryTime = source["askEveryTime"];
 	    }
 	}
 	

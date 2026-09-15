@@ -6,8 +6,28 @@ export type AssetSortDirection = 'asc' | 'desc'
 
 export type LocalLibraryImportMode = 'copy' | 'move'
 
+/** 从未确认过弹窗选择时的内置回退方式，需与后端 DefaultImportMode 保持一致。 */
+export const DEFAULT_IMPORT_MODE: LocalLibraryImportMode = 'copy'
+
 export interface LocalLibraryPreferences {
+  /** 最近一次在弹窗中确认的方式，也是「每次询问」关闭时实际执行的方式。 */
   importMode?: LocalLibraryImportMode
+  /**
+   * 「每次询问」开关。undefined 与 true 同义：全新配置没有该字段时应当询问；
+   * 旧配置只存了 importMode，视为用户已经确认过，不再询问。
+   */
+  askEveryTime?: boolean
+}
+
+/** 本次导入前是否需要弹窗选择导入方式。 */
+export function shouldAskImportMode(preferences: LocalLibraryPreferences): boolean {
+  if (preferences.askEveryTime !== undefined) return preferences.askEveryTime
+  return !preferences.importMode
+}
+
+/** 「每次询问」关闭时实际使用的导入方式。 */
+export function effectiveImportMode(preferences: LocalLibraryPreferences): LocalLibraryImportMode {
+  return preferences.importMode ?? DEFAULT_IMPORT_MODE
 }
 
 export interface LocalLibraryError {

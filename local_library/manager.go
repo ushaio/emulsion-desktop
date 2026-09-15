@@ -216,8 +216,15 @@ func (m *Manager) ImportPreferences() (LocalLibraryPreferences, error) {
 	return m.preferences.Get()
 }
 
-func (m *Manager) SetImportMode(mode ImportMode) (LocalLibraryPreferences, error) {
-	return m.preferences.SetImportMode(mode)
+// SetImportChoice records the mode picked in the import dialog together with the
+// "每次询问" switch state (askEveryTime is the inverse of "不再询问").
+func (m *Manager) SetImportChoice(mode ImportMode, askEveryTime bool) (LocalLibraryPreferences, error) {
+	return m.preferences.SetImportChoice(mode, askEveryTime)
+}
+
+// SetAskEveryTime flips the "每次询问" switch from the settings page.
+func (m *Manager) SetAskEveryTime(askEveryTime bool) (LocalLibraryPreferences, error) {
+	return m.preferences.SetAskEveryTime(askEveryTime)
 }
 
 func (m *Manager) Create(root, name string, adoptExisting bool) (LibrarySnapshot, error) {

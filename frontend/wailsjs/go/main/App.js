@@ -966,8 +966,12 @@ export function SetLocalAssetTags(arg1, arg2) {
   return window['go']['main']['App']['SetLocalAssetTags'](arg1, arg2);
 }
 
-export function SetLocalLibraryImportMode(arg1) {
-  return window['go']['main']['App']['SetLocalLibraryImportMode'](arg1);
+export function SetLocalLibraryAskEveryTime(arg1) {
+  return window['go']['main']['App']['SetLocalLibraryAskEveryTime'](arg1);
+}
+
+export function SetLocalLibraryImportChoice(arg1, arg2) {
+  return window['go']['main']['App']['SetLocalLibraryImportChoice'](arg1, arg2);
 }
 
 export function StartLocalLibraryScan() {

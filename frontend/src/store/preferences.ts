@@ -26,6 +26,12 @@ interface AdminPreferences extends GlassTuning {
   reduceTransparency: boolean
   accent: AccentId
   sidebarCollapsed: boolean
+  /**
+   * 经典外观下把侧栏画成半透明磨砂面（背板柔光从底下透出），并把侧栏的次级文字
+   * 加深一档 —— 半透明面板的对比度不够，得从文字这边补回来。是一组联动的视觉处理。
+   * 液态玻璃外观有自己的光幕与材质，这个开关对它没有作用。
+   */
+  sidebarFrosted: boolean
   zineStripWidth: number
   zineViewOptions: ZineViewOptions
   zineAiMode: ZineAiMode
@@ -44,6 +50,7 @@ interface AdminPreferences extends GlassTuning {
   resetGlassTuning: () => void
   setAccent: (accent: AccentId) => void
   setSidebarCollapsed: (collapsed: boolean) => void
+  setSidebarFrosted: (enabled: boolean) => void
   setZineStripWidth: (n: number) => void
   setZineViewOption: (key: ZineViewOptionKey, enabled: boolean) => void
   setZineAiMode: (mode: ZineAiMode) => void
@@ -64,6 +71,7 @@ export const usePreferences = create<AdminPreferences>()(
       reduceTransparency: false,
       accent: DEFAULT_ACCENT,
       sidebarCollapsed: false,
+      sidebarFrosted: true,
       zineStripWidth: 176,
       zineViewOptions: DEFAULT_ZINE_VIEW_OPTIONS,
       zineAiMode: 'ask',
@@ -81,6 +89,7 @@ export const usePreferences = create<AdminPreferences>()(
       resetGlassTuning: () => set({ ...GLASS_DEFAULTS }),
       setAccent: (accent) => set({ accent }),
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
+      setSidebarFrosted: (sidebarFrosted) => set({ sidebarFrosted }),
       setZineStripWidth: (n) => set({ zineStripWidth: n }),
       setZineViewOption: (key, enabled) => set((state) => ({
         zineViewOptions: { ...state.zineViewOptions, [key]: enabled },
@@ -117,6 +126,9 @@ export const usePreferences = create<AdminPreferences>()(
           ...saved,
           ...normalizeTuning(saved),
           glassCanvas: saved.glassCanvas === 'neutral' ? 'neutral' : 'aurora',
+          // 早于这个开关的存档里没有这个键 —— 缺省即开启（它描述的是经典外观侧栏
+          // 本来的样子）。显式存过 false 的用户仍然拿到关。
+          sidebarFrosted: saved.sidebarFrosted !== false,
         }
       },
     },

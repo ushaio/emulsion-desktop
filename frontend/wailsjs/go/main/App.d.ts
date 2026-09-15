@@ -491,7 +491,9 @@ export function SetLocalAssetCollections(arg1:string,arg2:Array<string>):Promise
 
 export function SetLocalAssetTags(arg1:string,arg2:Array<string>):Promise<void>;
 
-export function SetLocalLibraryImportMode(arg1:string):Promise<local_library.LocalLibraryPreferences>;
+export function SetLocalLibraryAskEveryTime(arg1:boolean):Promise<local_library.LocalLibraryPreferences>;
+
+export function SetLocalLibraryImportChoice(arg1:string,arg2:boolean):Promise<local_library.LocalLibraryPreferences>;
 
 export function StartLocalLibraryScan():Promise<void>;
 
