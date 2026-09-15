@@ -167,6 +167,7 @@ export function AppearanceTab() {
     appearance, setAppearance,
     glassCanvas, setGlassCanvas,
     reduceTransparency, setReduceTransparency,
+    sidebarFrosted, setSidebarFrosted,
     mode, refraction, aberration, frost, elasticity,
     setGlassMode, setGlassTuning, resetGlassTuning,
     language,
@@ -231,6 +232,37 @@ export function AppearanceTab() {
         </div>
       </div>
       {!glass && resolvedTheme === 'dark' && <p className="appearance-note">{zh ? '经典配色适用于浅色外观。' : 'Classic accent colors use light appearance.'}</p>}
+
+      {/* 经典外观的侧栏是唯一一块垂直压在窗口底上的结构面，所以「透过」这一项
+          只在这里给：液态玻璃外观下侧栏本来就是玻璃，不需要第二个开关。 */}
+      {!glass && (
+        <section className="appearance-group">
+          <h3>{zh ? '侧栏' : 'Sidebar'}</h3>
+          <p>
+            {zh
+              ? '侧栏与主区是并列的，内容不会延到侧栏底下，所以「透过」的东西得另外铺：打开后窗口底上有一层随配色变化的柔光，从半透明的侧栏底下露出来。侧栏的次级文字会同时加深一档 —— 半透明面板压不住原来的灰，对比度得从文字这边补回来。'
+              : 'The sidebar sits beside the content and nothing bleeds under it, so the backdrop is laid down separately: a tinted glow on the window floor that shows through the translucent sidebar. Secondary text in the sidebar darkens one step at the same time — a translucent panel cannot hold the original grey, so the contrast is bought back from the text.'}
+          </p>
+          <label className="appearance-row">
+            <span className="flex flex-col gap-1">
+              <span className="appearance-label">{zh ? '毛玻璃背景' : 'Frosted background'}</span>
+              <span className="appearance-hint">
+                {zh
+                  ? '侧栏底色转半透明、加一层背景模糊，并把次级文字加深一档。系统要求降低透明度时自动回到实色。'
+                  : 'The sidebar turns translucent behind a backdrop blur, with secondary text one step darker. Reverts to opaque when the system asks for reduced transparency.'}
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              role="switch"
+              className="appearance-switch"
+              aria-label={zh ? '侧栏毛玻璃背景' : 'Frosted sidebar background'}
+              checked={sidebarFrosted}
+              onChange={event => setSidebarFrosted(event.target.checked)}
+            />
+          </label>
+        </section>
+      )}
 
       {glass && <>
         <section className="appearance-group">
