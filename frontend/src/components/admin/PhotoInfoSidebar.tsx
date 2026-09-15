@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
   Check,
@@ -10,7 +10,6 @@ import {
   FileText,
   Heart,
   ImageOff,
-  Pencil,
   Plus,
   RefreshCw,
   Tag as TagIcon,
@@ -54,7 +53,7 @@ import { BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
 interface Props {
   photo: Photo | null;
   token: string | null;
-  t: (key: string) => string;
+  t: (key: string, params?: Record<string, string | number>) => string;
   notify: (message: string, type?: "success" | "error" | "info") => void;
   onOpenPreview: (photo: Photo) => void;
   onToggleFeatured: (id: string) => void;
@@ -62,6 +61,8 @@ interface Props {
   onDelete: (photo: Photo) => void;
   onSave: (photo: PhotoDto) => void;
   onUnauthorized: () => void;
+  /** 云端已有的全部分类，用于「添加分类」下拉匹配（与本地资源库标签一致） */
+  categories?: string[];
 }
 
 /** 「照片信息」两列网格里的一格：短字段（尺寸 / 体积 / 日期 / 存储提供商）。 */
@@ -95,10 +96,13 @@ export function PhotoInfoSidebar({
   onDelete,
   onSave,
   onUnauthorized,
+  categories = [],
 }: Props) {
   const [reanalyzing, setReanalyzing] = useState(false);
-  const [categoryEditing, setCategoryEditing] = useState(false);
-  const [categoryInput, setCategoryInput] = useState("");
+  // 分类交互与本地资源库的标签一致：chip + 虚线「添加」chip 原地变输入框 + 下拉匹配
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [categoryQuery, setCategoryQuery] = useState("");
+  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [categorySaving, setCategorySaving] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [shootingOpen, setShootingOpen] = useState(true);
@@ -108,6 +112,14 @@ export function PhotoInfoSidebar({
   const [realThumbUrl, setRealThumbUrl] = useState<string | null>(null);
   const [realOriginalUrl, setRealOriginalUrl] = useState<string | null>(null);
   const copyTimerRef = useRef<number | null>(null);
+  const categoryInputRef = useRef<HTMLInputElement>(null);
+
+  // 切换照片时收起添加分类的输入态，避免残留上一张的输入
+  useEffect(() => {
+    setAddingCategory(false);
+    setCategoryQuery("");
+    setCategoryMenuOpen(false);
+  }, [photo?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -158,27 +170,43 @@ export function PhotoInfoSidebar({
     }
   };
 
-  const startCategoryEdit = () => {
-    if (!photo) return;
-    setCategoryInput(photo.category || "");
-    setCategoryEditing(true);
-  };
+  /* ── 分类（对齐本地资源库的标签交互）──
+     云端 category 是逗号分隔的多分类字符串；增删单个分类后整体替换保存。 */
 
-  const cancelCategoryEdit = () => {
-    if (categorySaving) return;
-    setCategoryEditing(false);
-  };
+  const photoCategories = useMemo(
+    () =>
+      photo?.category
+        ? photo.category
+            .split(",")
+            .map((name) => name.trim())
+            .filter(Boolean)
+        : [],
+    [photo?.category],
+  );
 
-  const saveCategory = async () => {
+  const assignedCategorySet = useMemo(
+    () => new Set(photoCategories.map((name) => name.toLocaleLowerCase())),
+    [photoCategories],
+  );
+
+  const matchingCategories = useMemo(() => {
+    const query = categoryQuery.trim().toLocaleLowerCase();
+    return categories.filter(
+      (name) =>
+        !assignedCategorySet.has(name.toLocaleLowerCase()) &&
+        (!query || name.toLocaleLowerCase().includes(query)),
+    );
+  }, [assignedCategorySet, categories, categoryQuery]);
+
+  const saveCategories = async (next: string[]) => {
     if (!token || !photo || categorySaving) return;
     setCategorySaving(true);
     try {
       const updated = await UpdatePhoto(
         photo.id,
-        services.UpdatePhotoParams.createFrom({ category: categoryInput }),
+        services.UpdatePhotoParams.createFrom({ category: next.join(",") }),
       );
       onSave(updated as unknown as PhotoDto);
-      setCategoryEditing(false);
       notify(t("admin.notify_success"), "success");
     } catch (err) {
       if (err instanceof ApiUnauthorizedError) onUnauthorized();
@@ -187,6 +215,27 @@ export function PhotoInfoSidebar({
     } finally {
       setCategorySaving(false);
     }
+  };
+
+  const addCategory = async (name?: string) => {
+    if (!photo || categorySaving) return;
+    const query = categoryQuery.trim();
+    // 优先用点选的名称；否则匹配已有分类（忽略大小写）；再否则创建新分类
+    const target =
+      name ||
+      categories.find(
+        (item) => item.toLocaleLowerCase() === query.toLocaleLowerCase(),
+      ) ||
+      query;
+    if (!target) return;
+    if (assignedCategorySet.has(target.toLocaleLowerCase())) {
+      setCategoryQuery("");
+      return;
+    }
+    await saveCategories([...photoCategories, target]);
+    setCategoryQuery("");
+    setCategoryMenuOpen(false);
+    categoryInputRef.current?.focus();
   };
 
   if (!photo) {
@@ -314,98 +363,167 @@ export function PhotoInfoSidebar({
               </span>
             </button>
 
-            {/* 分类（点击就地编辑）/ 胶卷 pill（云端专属元数据） */}
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              {categoryEditing ? (
-                <div className="flex w-full items-center gap-1">
-                  <input
-                    value={categoryInput}
-                    onChange={(event) => setCategoryInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") saveCategory();
-                      else if (event.key === "Escape") cancelCategoryEdit();
+            {/* 分类（对齐本地资源库的标签交互）/ 胶卷 pill（云端专属元数据） */}
+            <div className="relative mt-2 w-full">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {photoCategories.map((name) => (
+                  <span
+                    key={name}
+                    className="group/cat inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[10px]"
+                    style={{
+                      borderColor: "var(--border)",
+                      backgroundColor: "var(--secondary)",
                     }}
+                  >
+                    <TagIcon
+                      size={9}
+                      className="shrink-0"
+                      style={{ color: "var(--primary)" }}
+                    />
+                    <span
+                      className="max-w-[120px] truncate"
+                      style={{ color: "var(--foreground)" }}
+                    >
+                      {name}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={categorySaving}
+                      aria-label={`${t("admin.remove")} ${name}`}
+                      onClick={() =>
+                        void saveCategories(
+                          photoCategories.filter((item) => item !== name),
+                        )
+                      }
+                      className="flex size-3.5 shrink-0 items-center justify-center rounded-full opacity-0 transition-opacity hover:bg-destructive/15 group-hover/cat:opacity-100 disabled:opacity-50"
+                      style={{ color: "var(--destructive)" }}
+                    >
+                      <X size={8} />
+                    </button>
+                  </span>
+                ))}
+
+                {/* 添加入口：默认虚线 chip，点击原地变成 chip 大小的内联输入框 */}
+                {addingCategory ? (
+                  <input
+                    ref={categoryInputRef}
                     autoFocus
-                    className="min-w-0 flex-1 rounded-md border bg-transparent px-2 py-1 text-[10px] outline-none focus:ring-1"
+                    value={categoryQuery}
+                    disabled={categorySaving}
+                    onFocus={() => setCategoryMenuOpen(true)}
+                    onChange={(event) => {
+                      setCategoryQuery(event.target.value);
+                      setCategoryMenuOpen(true);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void addCategory();
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        setCategoryQuery("");
+                        setCategoryMenuOpen(false);
+                        setAddingCategory(false);
+                      }
+                    }}
+                    onBlur={() => {
+                      /* 失焦时已输入则提交，否则直接收回 chip */
+                      if (categoryQuery.trim()) void addCategory();
+                      else {
+                        setCategoryMenuOpen(false);
+                        setAddingCategory(false);
+                      }
+                    }}
+                    placeholder={t("admin.category_add_placeholder")}
+                    className="h-[22px] w-36 rounded-full border bg-transparent px-2.5 text-[10px] outline-none transition-colors focus:border-primary disabled:opacity-40"
                     style={{
                       borderColor: "var(--border)",
                       color: "var(--foreground)",
                     }}
-                    placeholder={t("admin.category")}
                   />
+                ) : (
                   <button
                     type="button"
-                    onClick={saveCategory}
                     disabled={categorySaving}
-                    title={t("common.save")}
-                    className="flex size-6 shrink-0 items-center justify-center rounded-md hover:bg-secondary disabled:opacity-40"
-                    style={{ color: "var(--primary)" }}
+                    title={t("admin.category")}
+                    aria-label={t("admin.category")}
+                    onClick={() => setAddingCategory(true)}
+                    className="inline-flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-[10px] transition-colors hover:bg-secondary disabled:opacity-40"
+                    style={{
+                      borderColor: "var(--border)",
+                      color: "var(--muted-foreground)",
+                    }}
                   >
-                    <Check size={12} />
+                    <Plus size={10} />
+                    {t("admin.add")}
                   </button>
-                  <button
-                    type="button"
-                    onClick={cancelCategoryEdit}
-                    title={t("common.cancel")}
-                    className="flex size-6 shrink-0 items-center justify-center rounded-md hover:bg-secondary"
-                    style={{ color: "var(--muted-foreground)" }}
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-              ) : photo.category ? (
-                <button
-                  type="button"
-                  onClick={startCategoryEdit}
-                  title={t("admin.category")}
-                  className="group inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition-colors hover:bg-secondary"
-                  style={{
-                    borderColor: "var(--border)",
-                    backgroundColor: "var(--secondary)",
-                    color: "var(--foreground)",
-                  }}
-                >
-                  <TagIcon size={9} style={{ color: "var(--primary)" }} />
-                  <span className="max-w-[120px] truncate">
-                    {photo.category}
-                  </span>
-                  <Pencil
-                    size={9}
-                    className="opacity-0 transition-opacity group-hover:opacity-100"
-                    style={{ color: "var(--muted-foreground)" }}
-                  />
-                </button>
-              ) : (
-                /* 无分类时只留一个加号按钮，不铺一个空的分类 pill */
-                <button
-                  type="button"
-                  onClick={startCategoryEdit}
-                  title={t("admin.category")}
-                  aria-label={t("admin.category")}
-                  className="flex size-5 items-center justify-center rounded-full border transition-colors hover:bg-secondary"
-                  style={{
-                    borderColor: "var(--border)",
-                    color: "var(--muted-foreground)",
-                  }}
-                >
-                  <Plus size={10} />
-                </button>
-              )}
+                )}
 
-              {photo.filmRollName && (
-                <span
-                  className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px]"
-                  style={{
-                    borderColor: "var(--border)",
-                    backgroundColor: "var(--secondary)",
-                    color: "var(--muted-foreground)",
-                  }}
-                >
-                  <span className="max-w-[120px] truncate">
-                    {photo.filmRollName}
+                {photo.filmRollName && (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px]"
+                    style={{
+                      borderColor: "var(--border)",
+                      backgroundColor: "var(--secondary)",
+                      color: "var(--muted-foreground)",
+                    }}
+                  >
+                    <span className="max-w-[120px] truncate">
+                      {photo.filmRollName}
+                    </span>
                   </span>
-                </span>
-              )}
+                )}
+              </div>
+
+              {/* 添加分类下拉：匹配已有分类 + 输入内容不存在时创建 */}
+              {addingCategory &&
+                categoryMenuOpen &&
+                (matchingCategories.length > 0 || categoryQuery.trim()) && (
+                  <div
+                    className="absolute inset-x-0 top-full z-20 mt-1 max-h-44 overflow-y-auto rounded-lg border p-1 shadow-lg"
+                    style={{
+                      borderColor: "var(--border)",
+                      backgroundColor: "var(--popover)",
+                    }}
+                  >
+                    {matchingCategories.map((name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => void addCategory(name)}
+                        className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[11px] transition-colors hover:bg-secondary"
+                      >
+                        <TagIcon
+                          size={11}
+                          className="shrink-0"
+                          style={{ color: "var(--muted-foreground)" }}
+                        />
+                        <span className="truncate">{name}</span>
+                      </button>
+                    ))}
+                    {categoryQuery.trim() &&
+                      !categories.some(
+                        (item) =>
+                          item.toLocaleLowerCase() ===
+                          categoryQuery.trim().toLocaleLowerCase(),
+                      ) && (
+                        <button
+                          type="button"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => void addCategory()}
+                          className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors hover:bg-secondary"
+                          style={{ color: "var(--primary)" }}
+                        >
+                          <Plus size={11} />
+                          {t("admin.category_create", {
+                            name: categoryQuery.trim(),
+                          })}
+                        </button>
+                      )}
+                  </div>
+                )}
             </div>
           </div>
         }
