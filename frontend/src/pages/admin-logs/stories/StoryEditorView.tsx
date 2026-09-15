@@ -51,9 +51,13 @@ interface StoryEditorViewProps {
   onAiTaskLockChange: (locked: boolean) => void
 
   showPreview: () => void
+  /** 微信公众号效果预览 */
+  showWechatPreview: () => void
 
   onClose: () => void
   onSave: () => void
+  /** 未连接站点时禁用云端保存并给出提示（内容仍自动存本地草稿） */
+  saveTitle?: string
   onConvertToMilkdown: () => void
   onPasteFiles: (files: File[]) => void
   onOpenMaterialLibrary: () => void
@@ -113,8 +117,10 @@ export function StoryEditorView({
   isAiTaskLocked,
   onAiTaskLockChange,
   showPreview,
+  showWechatPreview,
   onClose,
   onSave,
+  saveTitle,
   onConvertToMilkdown,
   onPasteFiles,
   onOpenMaterialLibrary,
@@ -161,10 +167,12 @@ export function StoryEditorView({
         publishedLabel={t('admin.published')}
         draftLabel={t('admin.draft')}
         onSave={onSave}
-        saveDisabled={saving || isUploading || !editorReady}
+        saveDisabled={saving || isUploading || !editorReady || !token}
+        saveTitle={saveTitle}
         saveLabel={saving ? t('ui.saving') : isUploading ? t('admin.uploading') : t('admin.save')}
         savingLabel={t('ui.saving')}
         onPreview={showPreview}
+        onWechatPreview={showWechatPreview}
         previewLabel={t('admin.preview')}
         isImmersiveMode={isImmersiveMode}
         onToggleImmersive={() => setIsImmersiveMode((prev) => !prev)}

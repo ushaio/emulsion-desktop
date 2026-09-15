@@ -11,6 +11,7 @@ import type { NarrativeMilkdownEditorHandle } from '@/components/NarrativeMilkdo
 import NarrativeMilkdownEditor from '@/components/NarrativeMilkdownEditor'
 import { EditorShell } from './shared/EditorShell'
 import { BlogPreviewModal } from './shared/BlogPreviewModal'
+import { WechatPreviewModal } from './shared/WechatPreviewModal'
 import { cn } from '@/lib/utils'
 
 export interface BlogFormData extends ArticleContentDto {
@@ -19,6 +20,8 @@ export interface BlogFormData extends ArticleContentDto {
   category: string
   tags: string
   isPublished: boolean
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface BlogEditorHandle {
@@ -71,6 +74,8 @@ export const BlogEditorView = forwardRef<BlogEditorHandle, BlogEditorViewProps>(
 }, ref) {
   const editorRef = useRef<NarrativeMilkdownEditorHandle>(null)
   const [showPreview, setShowPreview] = useState(false)
+  // 预览模式：web = 网页效果；wechat = 公众号排版效果
+  const [previewMode, setPreviewMode] = useState<'web' | 'wechat'>('web')
   const language = usePreferences((state) => state.language)
   const hasMilkdownContent = blog.contentEditorTypes.includes('milkdown')
   const canEdit = blog.editorType === 'milkdown' && hasMilkdownContent
@@ -105,10 +110,12 @@ export const BlogEditorView = forwardRef<BlogEditorHandle, BlogEditorViewProps>(
         publishedLabel={t('admin.published')}
         draftLabel={t('admin.draft')}
         onSave={onSave}
-        saveDisabled={saving || isAiTaskLocked || !canEdit}
+        saveDisabled={saving || isAiTaskLocked || !canEdit || !token}
+        saveTitle={token ? undefined : t('admin.save_offline_hint')}
         saveLabel={t('admin.save')}
         savingLabel={t('ui.saving')}
-        onPreview={() => setShowPreview(true)}
+        onPreview={() => { setPreviewMode('web'); setShowPreview(true) }}
+        onWechatPreview={() => { setPreviewMode('wechat'); setShowPreview(true) }}
         previewLabel={t('admin.preview')}
         isImmersiveMode={isImmersiveMode}
         onToggleImmersive={() => setIsImmersiveMode((prev) => !prev)}
@@ -173,12 +180,24 @@ export const BlogEditorView = forwardRef<BlogEditorHandle, BlogEditorViewProps>(
       </EditorShell>
 
       {showPreview && (
-        <BlogPreviewModal
-          blog={{ title: blog.title, editorType: blog.editorType, tiptapContent: blog.tiptapContent, milkContent: blog.milkContent, category: blog.category, tags: blog.tags }}
-          updatedAt={undefined}
-          t={t}
-          onClose={() => setShowPreview(false)}
-        />
+        previewMode === 'wechat' ? (
+          <WechatPreviewModal
+            title={blog.title}
+            editorType={blog.editorType}
+            tiptapContent={blog.tiptapContent}
+            milkContent={blog.milkContent}
+            publishedAt={blog.createdAt ? new Date(blog.createdAt).getTime() : undefined}
+            t={t}
+            onClose={() => setShowPreview(false)}
+          />
+        ) : (
+          <BlogPreviewModal
+            blog={{ title: blog.title, editorType: blog.editorType, tiptapContent: blog.tiptapContent, milkContent: blog.milkContent, category: blog.category, tags: blog.tags }}
+            updatedAt={undefined}
+            t={t}
+            onClose={() => setShowPreview(false)}
+          />
+        )
       )}
     </div>
   )

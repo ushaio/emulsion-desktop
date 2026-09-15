@@ -99,7 +99,8 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
 
   const currentThemeLabel = t(themeOptions.find((o) => o.value === theme)?.label ?? 'common.system', language)
   const currentLanguageLabel = languageOptions.find((o) => o.value === language)?.label ?? '中文'
-  // Local library, Design Studio, and the desktop AI assistant work without a connected site.
+  // Local library, Design Studio, the desktop AI assistant, and the photo journal
+  // (local drafts) work without a connected site.
   // Inspiration is a separate online surface, but remains discoverable before
   // login so users can reach its connection state and future sharing flow.
   const visibleNavGroups = isAuthenticated
@@ -107,9 +108,10 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
     : navGroups
       .map((group) => group.filter((item) =>
         item.path === '/library'
-        || item.path === '/design'
-        || item.path === '/ai-assistant'
-        || item.path === '/inspiration',
+          || item.path === '/design'
+          || item.path === '/ai-assistant'
+          || item.path === '/inspiration'
+          || item.path === '/photo-journal',
       ))
       .filter((group) => group.length > 0)
 

@@ -36,7 +36,18 @@ interface CloudPhotoLibraryDialogProps extends PhotoLibraryDialogBaseProps {
   onImportAssets?: never
 }
 
-type PhotoLibraryDialogProps = ZinePhotoLibraryDialogProps | CloudPhotoLibraryDialogProps
+/** 本地资源库导入（如叙事编辑器离线选图）：返回原始 LocalAsset，由调用方决定落地方式 */
+interface LocalPhotoLibraryDialogProps extends PhotoLibraryDialogBaseProps {
+  source: 'local-library' | null
+  existingLocalAssetIds?: string[]
+  onImportLocalAssets: (assets: LocalAsset[]) => void
+  existingPhotoIds?: never
+  onImportPhotos?: never
+  existingAssets?: never
+  onImportAssets?: never
+}
+
+type PhotoLibraryDialogProps = ZinePhotoLibraryDialogProps | CloudPhotoLibraryDialogProps | LocalPhotoLibraryDialogProps
 
 function cloudPhotoToZineAsset(photo: Photo): ZineAsset {
   return {
@@ -100,11 +111,13 @@ export function PhotoLibraryDialog(props: PhotoLibraryDialogProps) {
     : (props.existingAssets ?? [])
       .filter((asset) => asset.origin === 'cloud-library' || (!asset.origin && asset.id.startsWith('library_')))
       .map((asset) => asset.libraryPhotoId ?? asset.id.replace(/^library_/, ''))
-  const existingLocalIds = 'existingAssets' in props
-    ? (props.existingAssets ?? [])
-      .filter((asset) => asset.origin === 'local-library' || (!asset.origin && asset.id.startsWith('local-library_')))
-      .map((asset) => asset.libraryPhotoId ?? asset.id.replace(/^local-library_/, ''))
-    : []
+  const existingLocalIds = 'existingLocalAssetIds' in props
+    ? (props.existingLocalAssetIds ?? [])
+    : 'existingAssets' in props
+      ? (props.existingAssets ?? [])
+        .filter((asset) => asset.origin === 'local-library' || (!asset.origin && asset.id.startsWith('local-library_')))
+        .map((asset) => asset.libraryPhotoId ?? asset.id.replace(/^local-library_/, ''))
+      : []
 
   if (!source || typeof document === 'undefined') return null
 
@@ -115,6 +128,8 @@ export function PhotoLibraryDialog(props: PhotoLibraryDialogProps) {
   function handleImport() {
     if ('onImportPhotos' in props) {
       props.onImportPhotos!(selectedCloudPhotos)
+    } else if ('onImportLocalAssets' in props) {
+      props.onImportLocalAssets!(selectedLocalAssets)
     } else {
       const assets = cloud
         ? selectedCloudPhotos.map(cloudPhotoToZineAsset)

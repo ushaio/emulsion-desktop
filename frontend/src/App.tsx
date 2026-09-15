@@ -119,7 +119,8 @@ function AppRoutes() {
         <Route path="albums" element={<AuthenticatedRoute><Navigate to="/library?source=cloud&view=albums" replace /></AuthenticatedRoute>} />
         <Route path="film-rolls" element={<AuthenticatedRoute><Navigate to="/library?source=cloud&view=film-rolls" replace /></AuthenticatedRoute>} />
         <Route path="upload" element={<AuthenticatedRoute><UploadPage /></AuthenticatedRoute>} />
-        <Route path="photo-journal" element={<AuthenticatedRoute><PhotoJournalPage /></AuthenticatedRoute>} />
+        {/* 照片日志离线可用（草稿为本地文章），仅叙事/博客子页签依赖云端 */}
+      <Route path="photo-journal" element={<PhotoJournalPage />} />
         <Route path="design" element={<DesignStudioPage />} />
         <Route path="design/new" element={<Navigate to="/design" replace />} />
         <Route path="design/canvas/editor/:projectId" element={<CanvasEditorPage />} />

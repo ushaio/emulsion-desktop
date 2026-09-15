@@ -20,7 +20,7 @@ import type { UploadProgressState } from './types'
 import { useStoryPasteUploads } from './useStoryPasteUploads'
 import { uploadStoryPhotoFile } from './uploadStoryPhotoFile'
 import { isMilkdownStoryReady } from './utils'
-import { GetAllPhotos } from '../../../../wailsjs/go/main/App'
+import { GetAllPhotos, SetLocalAssetCloudLink } from '../../../../wailsjs/go/main/App'
 
 interface UseStoryEditorActionsParams {
   token: string | null
@@ -286,6 +286,16 @@ export function useStoryEditorActions({
           uploadedPhotos.push(photo)
         }
         setPendingImages((prev) => prev.map((image) => image.id === pending.id ? { ...image, status: 'success' as const, progress: 100, photoId: photo.id } : image))
+        if (pending.assetId) {
+          // 来自本地资源库的图片：上传成功后建立与云端照片的关联，
+          // 之后本地资源库的周期云同步会据此补全云端投影；失败不影响上传结果
+          try {
+            await SetLocalAssetCloudLink(pending.assetId, photo.id, '')
+          } catch (error) {
+            console.error('Failed to link local library asset to cloud photo:', error)
+            notify(t('admin.local_asset_cloud_link_failed'), 'info')
+          }
+        }
         if (reusedDuplicate) {
           addPhotoToCache(photo)
           notify(`图片已存在，已复用：${photo.title}`, 'info')

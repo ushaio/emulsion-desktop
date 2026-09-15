@@ -17,6 +17,7 @@ import { ImageUploadSettingsModal, type UploadSettings } from '@/components/admi
 import { SimpleDeleteDialog } from '@/components/admin/SimpleDeleteDialog'
 import { DraftRestoreDialog } from '@/components/admin/DraftRestoreDialog'
 import { StoryPreviewModal } from '@/components/admin/StoryPreviewModal'
+import { WechatPreviewModal } from '@/pages/admin-logs/shared/WechatPreviewModal'
 import { StoryCoverCropModal } from '@/components/admin/StoryCoverCropModal'
 import { PhotoLibraryDialog } from '@/components/zine/PhotoLibraryDialog'
 import { StoryPhotoPanel, type PendingImage } from '@/components/admin/StoryPhotoPanel'
@@ -51,6 +52,7 @@ import {
   UpdateStory,
 } from '../../../wailsjs/go/main/App'
 import type { services } from '../../../wailsjs/go/models'
+import type { LocalAsset } from '@/features/library/local/types'
 import type { Photo } from '@/types'
 
 const DEFAULT_UPLOAD_SETTINGS: UploadSettings = {
@@ -75,7 +77,7 @@ const DEFAULT_PASTE_UPLOAD_SETTINGS: UploadSettings = {
   stripGps: false,
 }
 
-export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt', editFromDraft, onDraftConsumed, refreshKey, createRequestKey = 0, newStoryPhotoIds, listPaneCollapsed = false, onToggleListPane, subTabNav, active = true, isImmersiveMode, setIsImmersiveMode }: StoriesTabProps) {
+export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt', editFromDraft, onDraftConsumed, onEditorClosed, refreshKey, createRequestKey = 0, newStoryPhotoIds, listPaneCollapsed = false, onToggleListPane, subTabNav, hideListPane = false, active = true, isImmersiveMode, setIsImmersiveMode }: StoriesTabProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const { settings, categories } = useAdmin()
@@ -99,6 +101,8 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
   const [useCustomDate, setUseCustomDate] = useState(false)
   const [isPhotoPanelCollapsed, setIsPhotoPanelCollapsed] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
+  // 预览模式：web = 发布页效果；wechat = 公众号排版效果
+  const [previewMode, setPreviewMode] = useState<'web' | 'wechat'>('web')
   const [previewPhotoIndex, setPreviewPhotoIndex] = useState<number | null>(null)
   const [showCoverCropEditor, setShowCoverCropEditor] = useState(false)
   const [isAiTaskLocked, setIsAiTaskLocked] = useState(false)
@@ -109,6 +113,12 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
   const pendingPhotoIdsRef = useRef<string[] | null>(null)
 
   const loadStories = useCallback(async () => {
+    // 未连接站点：叙事列表是云端内容，跳过加载（草稿编辑不受影响）
+    if (!token) {
+      setStories([])
+      setLoading(false)
+      return
+    }
     try {
       setLoading(true)
       const data = await GetStories() as unknown as StoryDto[]
@@ -119,16 +129,17 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
     } finally {
       setLoading(false)
     }
-  }, [notify, t])
+  }, [notify, t, token])
 
   const loadAllPhotos = useCallback(async () => {
+    if (!token) return
     try {
       const data = await GetAllPhotos() as unknown as PhotoDto[]
       setAllPhotos(data || [])
     } catch (error) {
       console.error('Failed to load photos:', error)
     }
-  }, [])
+  }, [token])
 
   const {
     editorSessionId,
@@ -377,10 +388,11 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
     setIsDraggingOver(false)
     // 退出编辑时自动展开左栏列表（编辑态可能已收起）
     if (listPaneCollapsed) onToggleListPane?.()
+    onEditorClosed?.()
     if (location.search.includes('editStory=')) {
       navigate('/photo-journal', { replace: true })
     }
-  }, [listPaneCollapsed, location.search, onToggleListPane, pendingImages, resetDraftState, navigate, setIsDraggingOver])
+  }, [listPaneCollapsed, location.search, onEditorClosed, onToggleListPane, pendingImages, resetDraftState, navigate, setIsDraggingOver])
 
   const handleSaveStory = useCallback(async () => {
     if (!token || !currentStory || !isMilkdownStoryReady(currentStory)) return
@@ -436,6 +448,38 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
     })
     setShowMaterialLibrary(false)
   }, [])
+
+  // 离线素材库（本地资源库）：选中的本地图转待传图片，随草稿落盘，联网保存时再上传
+  const handleImportLocalMaterials = useCallback(async (assets: LocalAsset[]) => {
+    const imported: PendingImage[] = []
+    for (const asset of assets) {
+      try {
+        const response = await fetch(asset.originalUrl)
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const blob = await response.blob()
+        if (!blob.size) throw new Error('empty file')
+        imported.push({
+          id: crypto.randomUUID(),
+          file: new File([blob], asset.fileName || `image.${asset.extension || 'jpg'}`, {
+            type: asset.mimeType || blob.type || 'image/jpeg',
+          }),
+          previewUrl: URL.createObjectURL(blob),
+          status: 'pending',
+          progress: 0,
+          takenAt: asset.capturedAt,
+          // 保留来源，上传成功后据此建立本地资源库与云端照片的关联
+          assetId: asset.id,
+        })
+      } catch (error) {
+        console.error('Failed to import local asset:', asset.fileName, error)
+      }
+    }
+    if (imported.length > 0) {
+      setPendingImages((prev) => [...prev, ...imported])
+    } else {
+      notify(t('common.error'), 'error')
+    }
+  }, [notify, t])
 
   const handleRemovePhoto = useCallback((photoId: string) => {
     setCurrentStory((prev) => {
@@ -683,7 +727,8 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
 
   return (
     <div className={cn('flex h-full min-h-0 overflow-hidden', isImmersiveMode ? 'fixed inset-0 z-[45] h-dvh w-screen gap-3 bg-background p-3 sm:p-4' : storyEditMode === 'editor' ? 'gap-0' : 'gap-4')}>
-      {/* 左栏：叙事列表（可折叠） */}
+      {/* 左栏：叙事列表（可折叠；从草稿进入编辑时隐藏，左栏由草稿列表提供） */}
+      {hideListPane ? null : (
       <CollapsibleListPane
         collapsed={listPaneCollapsed}
         onToggle={() => onToggleListPane?.()}
@@ -707,6 +752,7 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
           compact
         />
       </CollapsibleListPane>
+      )}
 
       {/* 右栏：编辑器 + 素材库（无间隙） */}
       <div className="flex min-w-0 flex-1 overflow-hidden">
@@ -768,6 +814,7 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
           pendingImages={pendingImages}
           pendingCoverId={pendingCoverId}
           saving={saving}
+          saveTitle={token ? undefined : t('admin.save_offline_hint')}
           draftSaved={draftSaved}
           lastSavedAt={lastSavedAt}
           isImmersiveMode={isImmersiveMode}
@@ -789,7 +836,8 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
           dragOverItemId={dragOverItemId}
           openMenuPhotoId={openMenuPhotoId}
           openMenuPendingId={openMenuPendingId}
-          showPreview={() => setShowPreview(true)}
+          showPreview={() => { setPreviewMode('web'); setShowPreview(true) }}
+          showWechatPreview={() => { setPreviewMode('wechat'); setShowPreview(true) }}
           onClose={resetEditorState}
           onSave={() => void handleSaveStory()}
           onConvertToMilkdown={handleConvertToMilkdown}
@@ -835,12 +883,21 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
       </div>
 
 
-      <PhotoLibraryDialog
-        source={showMaterialLibrary ? 'cloud' : null}
-        existingPhotoIds={currentPhotoIds}
-        onClose={() => setShowMaterialLibrary(false)}
-        onImportPhotos={handleImportMaterials}
-      />
+      {/* 素材库：已连接站点用云端资源库；未连接时只能选本地资源库 */}
+      {token ? (
+        <PhotoLibraryDialog
+          source={showMaterialLibrary ? 'cloud' : null}
+          existingPhotoIds={currentPhotoIds}
+          onClose={() => setShowMaterialLibrary(false)}
+          onImportPhotos={handleImportMaterials}
+        />
+      ) : (
+        <PhotoLibraryDialog
+          source={showMaterialLibrary ? 'local-library' : null}
+          onClose={() => setShowMaterialLibrary(false)}
+          onImportLocalAssets={(assets) => void handleImportLocalMaterials(assets)}
+        />
+      )}
       <ImageUploadSettingsModal isOpen={showUploadSettings} onClose={() => setShowUploadSettings(false)} onConfirm={handleConfirmUpload} pendingCount={pendingImages.filter((image) => image.status === 'pending' || image.status === 'failed').length} t={t} token={token} initialSettings={uploadSettings} settings={settings} categories={categories} currentStoryId={currentStory?.id} />
       <ImageUploadSettingsModal
         isOpen={showPasteUploadSettings}
@@ -861,17 +918,31 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
       <SimpleDeleteDialog isOpen={!!deleteStoryId} onConfirm={confirmDeleteStory} onCancel={() => setDeleteStoryId(null)} t={t} />
       <DraftRestoreDialog isOpen={draftRestoreDialog.isOpen} draftTime={draftRestoreDialog.draft?.savedAt || 0} onRestore={handleDraftRestoreWithRevision} onDiscard={handleDraftDiscardWithRevision} onCancel={handleDraftCancel} t={t} />
       {showPreview && currentStory ? (
-        <StoryPreviewModal
-          story={currentStory}
-          cdnDomain={settings?.cdn_domain}
-          previewPhotoIndex={previewPhotoIndex}
-          onClose={() => setShowPreview(false)}
-          onPhotoClick={setPreviewPhotoIndex}
-          onPhotoClose={() => setPreviewPhotoIndex(null)}
-          onPrevPhoto={handlePrevPhoto}
-          onNextPhoto={handleNextPhoto}
-          t={t}
-        />
+        previewMode === 'wechat' ? (
+          <WechatPreviewModal
+            title={currentStory.title}
+            editorType={currentStory.editorType}
+            tiptapContent={currentStory.tiptapContent}
+            milkContent={currentStory.milkContent}
+            photos={currentStory.photos}
+            cdnDomain={settings?.cdn_domain}
+            publishedAt={new Date(currentStory.storyDate || currentStory.createdAt).getTime()}
+            t={t}
+            onClose={() => setShowPreview(false)}
+          />
+        ) : (
+          <StoryPreviewModal
+            story={currentStory}
+            cdnDomain={settings?.cdn_domain}
+            previewPhotoIndex={previewPhotoIndex}
+            onClose={() => setShowPreview(false)}
+            onPhotoClick={setPreviewPhotoIndex}
+            onPhotoClose={() => setPreviewPhotoIndex(null)}
+            onPrevPhoto={handlePrevPhoto}
+            onNextPhoto={handleNextPhoto}
+            t={t}
+          />
+        )
       ) : null}
       {showCoverCropEditor && currentCoverPhoto ? (
         <StoryCoverCropModal

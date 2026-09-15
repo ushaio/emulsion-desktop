@@ -45,9 +45,13 @@ interface BlogTabProps {
   editBlogId?: string
   editSource?: 'draft' | 'database'
   onDraftConsumed?: () => void
+  /** 编辑器关闭后回调（未连接站点时用于切回草稿页签） */
+  onEditorClosed?: () => void
   listPaneCollapsed?: boolean
   onToggleListPane?: () => void
   subTabNav?: ReactNode
+  /** 隐藏自带左栏列表（从草稿页签进入编辑时，左栏由草稿列表提供） */
+  hideListPane?: boolean
   /** 当前子页签是否可见（沉浸模式仅在编辑器可见时保持） */
   active?: boolean
   isImmersiveMode: boolean
@@ -71,7 +75,7 @@ function sameBlogContent(left: BlogFormData, right: BlogFormData) {
     left.category === right.category && left.tags === right.tags && left.isPublished === right.isPublished
 }
 
-export function BlogTab({ photos, settings, t, notify, refreshKey, createRequestKey = 0, editBlogFromDraft, editBlogId, editSource = 'draft', onDraftConsumed, listPaneCollapsed = false, onToggleListPane, subTabNav, active = true, isImmersiveMode, setIsImmersiveMode }: BlogTabProps) {
+export function BlogTab({ photos, settings, t, notify, refreshKey, createRequestKey = 0, editBlogFromDraft, editBlogId, editSource = 'draft', onDraftConsumed, onEditorClosed, listPaneCollapsed = false, onToggleListPane, subTabNav, hideListPane = false, active = true, isImmersiveMode, setIsImmersiveMode }: BlogTabProps) {
   const { token } = useAuth()
   const [blogs, setBlogs] = useState<BlogDto[]>([])
   const [loading, setLoading] = useState(true)
@@ -169,6 +173,12 @@ export function BlogTab({ photos, settings, t, notify, refreshKey, createRequest
   useDirtyLeaveGuard(isDirty && editing, editing)
 
   const fetchBlogs = useCallback(async () => {
+    // 未连接站点：博客列表是云端内容，跳过加载（草稿编辑不受影响）
+    if (!token) {
+      setBlogs([])
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const data = await getDesktopBlogApp().GetBlogs()
@@ -179,7 +189,7 @@ export function BlogTab({ photos, settings, t, notify, refreshKey, createRequest
     } finally {
       setLoading(false)
     }
-  }, [notify, t])
+  }, [notify, t, token])
 
   useEffect(() => {
     void fetchBlogs()
@@ -530,6 +540,11 @@ export function BlogTab({ photos, settings, t, notify, refreshKey, createRequest
 
   const handleSaveBlog = async () => {
     if (savingRef.current || isAiTaskLocked || !currentBlog) return
+    // 未连接站点：保存到云端不可用，内容由自动草稿兜底
+    if (!token) {
+      notify(t('admin.save_offline_hint'), 'info')
+      return
+    }
     if (!currentBlog.title.trim()) {
       notify(t('blog.enter_title'), 'error')
       return
@@ -582,6 +597,24 @@ export function BlogTab({ photos, settings, t, notify, refreshKey, createRequest
           await enqueueDraftWrite(async () => {
             await rekeyBlogDraft(snapshot.id, saved.id)
             const draft = await getBlogDraftFromDB(saved.id)
+            if (!draft) {
+              // 本地记录缺失（例如新建后 2 秒内直接保存，防抖自动保存还没落盘）：
+              // 用已保存的快照补齐本地记录并直接标记已同步，保持本地与云端 1:1 对应
+              await saveBlogDraftToDB({
+                blogId: saved.id,
+                title: snapshot.title,
+                editorType: snapshot.editorType,
+                contentEditorTypes: snapshot.contentEditorTypes,
+                tiptapContent: snapshot.tiptapContent,
+                tiptapContentJson: snapshot.tiptapContentJson ?? null,
+                milkContent: snapshot.milkContent ?? null,
+                category: snapshot.category,
+                tags: snapshot.tags,
+                isPublished: snapshot.isPublished,
+                cloudSynced: true,
+              })
+              return
+            }
             if (draft && sameBlogContent(draft, snapshot)) await markBlogDraftSynced(saved.id, draft.savedAt)
           })
         } catch (error) {
@@ -610,7 +643,8 @@ export function BlogTab({ photos, settings, t, notify, refreshKey, createRequest
     setIsDirty(false)
     // 退出编辑时自动展开左栏列表（编辑态可能已收起）
     if (listPaneCollapsed) onToggleListPane?.()
-  }, [flushCurrentDraft, listPaneCollapsed, onToggleListPane, startEditorSession])
+    onEditorClosed?.()
+  }, [flushCurrentDraft, listPaneCollapsed, onEditorClosed, onToggleListPane, startEditorSession])
 
   const handleBlogChange = useCallback((patch: Partial<BlogFormData>) => {
     setCurrentBlog((prev) => (prev ? { ...prev, ...patch } : prev))
@@ -657,7 +691,8 @@ export function BlogTab({ photos, settings, t, notify, refreshKey, createRequest
 
   return (
     <div className={cn('flex h-full min-h-0 overflow-hidden', isImmersiveMode ? 'fixed inset-0 z-[45] h-dvh w-screen gap-3 bg-background p-3 sm:p-4' : 'gap-5')}>
-      {/* 左栏：博客列表（可折叠） */}
+      {/* 左栏：博客列表（可折叠；从草稿进入编辑时隐藏，左栏由草稿列表提供） */}
+      {hideListPane ? null : (
       <CollapsibleListPane
         collapsed={listPaneCollapsed}
         onToggle={() => onToggleListPane?.()}
@@ -678,6 +713,7 @@ export function BlogTab({ photos, settings, t, notify, refreshKey, createRequest
           t={t}
         />
       </CollapsibleListPane>
+      )}
 
       {/* 右栏：编辑器 + 素材库（无间隙） */}
       <div className="flex min-w-0 flex-1 overflow-hidden">

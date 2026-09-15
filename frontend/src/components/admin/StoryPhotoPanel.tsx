@@ -28,6 +28,8 @@ export interface PendingImage {
   error?: string
   photoId?: string
   takenAt?: string
+  /** 来自本地资源库时的资源 ID：上传成功后可建立本地资源库与云端照片的关联 */
+  assetId?: string
 }
 
 interface StoryPhotoPanelProps {

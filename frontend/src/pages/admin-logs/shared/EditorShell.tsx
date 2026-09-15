@@ -1,8 +1,9 @@
 'use client'
 
-import type { ReactNode } from 'react'
-import { Eye, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, Save, X } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Eye, Maximize2, Minimize2, Monitor, PanelLeftClose, PanelLeftOpen, Save, X } from 'lucide-react'
 import { AdminButton } from '@/components/admin/AdminButton'
+import { WechatIcon } from '@/components/icons/WechatIcon'
 import { cn } from '@/lib/utils'
 
 /**
@@ -34,9 +35,13 @@ export interface EditorShellProps {
   saveDisabled?: boolean
   saveLabel: string
   savingLabel: string
+  /** 保存按钮提示（未连接站点时说明内容已自动存为本地草稿） */
+  saveTitle?: string
 
   // 预览 / 沉浸
   onPreview?: () => void
+  /** 微信公众号效果预览；与 onPreview 同时提供时预览按钮展开选项菜单 */
+  onWechatPreview?: () => void
   previewLabel?: string
   isImmersiveMode?: boolean
   onToggleImmersive?: () => void
@@ -77,7 +82,9 @@ export function EditorShell({
   saveDisabled,
   saveLabel,
   savingLabel,
+  saveTitle,
   onPreview,
+  onWechatPreview,
   previewLabel,
   isImmersiveMode,
   onToggleImmersive,
@@ -92,6 +99,21 @@ export function EditorShell({
   children,
   t,
 }: EditorShellProps) {
+  const previewMenuRef = useRef<HTMLDivElement | null>(null)
+  const [previewMenuOpen, setPreviewMenuOpen] = useState(false)
+
+  // 点击预览菜单外部时收起
+  useEffect(() => {
+    if (!previewMenuOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (previewMenuRef.current && !previewMenuRef.current.contains(event.target as Node)) {
+        setPreviewMenuOpen(false)
+      }
+    }
+    window.addEventListener('pointerdown', onPointerDown)
+    return () => window.removeEventListener('pointerdown', onPointerDown)
+  }, [previewMenuOpen])
+
   return (
     <div className={cn('flex h-full min-h-0 flex-col gap-3 overflow-hidden', className)}>
       {/* 顶栏 */}
@@ -161,14 +183,54 @@ export function EditorShell({
             </span>
           </div>
           {onPreview ? (
-            <AdminButton
-              onClick={onPreview}
-              adminVariant="outline"
-              className="flex h-8 shrink-0 items-center gap-2 rounded-md border border-border/80 bg-card px-2.5 text-[10px] shadow-none transition-all hover:bg-accent hover:text-accent-foreground"
-            >
-              <Eye className="h-3.5 w-3.5" />
-              <span className="hidden md:inline">{previewLabel || t('admin.preview')}</span>
-            </AdminButton>
+            <div ref={previewMenuRef} className="relative shrink-0">
+              <AdminButton
+                onClick={() => {
+                  // 双预览：点击展开选项；仅 Web 预览时保持原行为直接打开
+                  if (onWechatPreview) setPreviewMenuOpen((prev) => !prev)
+                  else onPreview()
+                }}
+                adminVariant="outline"
+                aria-haspopup="menu"
+                aria-expanded={onWechatPreview ? previewMenuOpen : undefined}
+                className="flex h-8 items-center gap-2 rounded-md border border-border/80 bg-card px-2.5 text-[10px] shadow-none transition-all hover:bg-accent hover:text-accent-foreground"
+              >
+                <Eye className="h-3.5 w-3.5" />
+                <span className="hidden md:inline">{previewLabel || t('admin.preview')}</span>
+              </AdminButton>
+              {onWechatPreview && previewMenuOpen ? (
+                <div
+                  role="menu"
+                  className="absolute right-0 top-[calc(100%+6px)] z-30 flex w-36 flex-col gap-0.5 rounded-md border bg-card p-1 shadow-lg"
+                  style={{ borderColor: 'var(--border)' }}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setPreviewMenuOpen(false)
+                      onPreview()
+                    }}
+                    className="flex items-center gap-2.5 rounded px-2.5 py-2 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+                  >
+                    <Monitor className="h-4 w-4 shrink-0" style={{ color: 'var(--muted-foreground)' }} />
+                    <span className="flex-1">{t('admin.preview_web')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setPreviewMenuOpen(false)
+                      onWechatPreview()
+                    }}
+                    className="flex items-center gap-2.5 rounded px-2.5 py-2 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+                  >
+                    <WechatIcon className="h-4 w-4 shrink-0" style={{ color: 'var(--muted-foreground)' }} />
+                    <span className="flex-1">{t('admin.preview_wechat')}</span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
           ) : null}
           {onToggleImmersive ? (
             <AdminButton
@@ -188,6 +250,7 @@ export function EditorShell({
             adminVariant="primary"
             size="md"
             className="flex h-9 shrink-0 items-center gap-2 rounded-md px-3.5 shadow-none"
+            title={saveTitle}
           >
             <Save className="h-3.5 w-3.5" />
             <span>{saving ? savingLabel : saveLabel}</span>

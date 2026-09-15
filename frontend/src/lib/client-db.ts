@@ -27,7 +27,7 @@ export interface StoryEditorDraftData extends ArticleContentDto {
   photoIds: string[];
   savedAt: number;
   cloudSynced?: boolean;
-  files: { id: string; file: File; takenAt?: string }[];
+  files: { id: string; file: File; takenAt?: string; assetId?: string }[];
 }
 
 // ============ Blog Draft Types ============
@@ -68,6 +68,8 @@ interface StoredDraftFile {
   type: string;
   lastModified: number;
   takenAt?: string;
+  /** 来自本地资源库时的资源 ID，用于上传后建立本地资源库与云端照片的关联 */
+  assetId?: string;
   data: string;
 }
 
@@ -111,12 +113,13 @@ function base64ToFile(file: StoredDraftFile): File {
 
 async function encodeDraft(data: Record<string, unknown>): Promise<Record<string, unknown>> {
   if (!Array.isArray(data.files)) return data;
-  const files = await Promise.all((data.files as Array<{ id: string; file: File; takenAt?: string }>).map(async (entry) => ({
+  const files = await Promise.all((data.files as Array<{ id: string; file: File; takenAt?: string; assetId?: string }>).map(async (entry) => ({
     id: entry.id,
     name: entry.file.name,
     type: entry.file.type,
     lastModified: entry.file.lastModified,
     ...(entry.takenAt ? { takenAt: entry.takenAt } : {}),
+    ...(entry.assetId ? { assetId: entry.assetId } : {}),
     data: await fileToBase64(entry.file),
   })));
   return { ...data, files };
@@ -147,7 +150,15 @@ function decodeDraft<T>(value: T): T {
   if (!data || typeof data !== 'object' || !('files' in data)) return data;
   const draft = data as T & { files?: StoredDraftFile[] };
   if (!Array.isArray(draft.files)) return data;
-  return { ...draft, files: draft.files.map((entry) => ({ id: entry.id, file: base64ToFile(entry), ...(entry.takenAt ? { takenAt: entry.takenAt } : {}) })) } as T;
+  return {
+    ...draft,
+    files: draft.files.map((entry) => ({
+      id: entry.id,
+      file: base64ToFile(entry),
+      ...(entry.takenAt ? { takenAt: entry.takenAt } : {}),
+      ...(entry.assetId ? { assetId: entry.assetId } : {}),
+    })),
+  } as T;
 }
 
 let nativeMigrationPromise: Promise<void> | null = null;
@@ -299,8 +310,10 @@ export async function saveDraftToDB(data: {
   contentEditorTypes?: EditorType[];
   selectedAlbumIds: string[];
   files: { id: string; file: File }[];
+  /** 写入时直接记录的同步状态（默认 false；保存到云端后补齐本地记录时传 true） */
+  cloudSynced?: boolean;
 }): Promise<void> {
-  const draftData: StoryDraftData = { id: STORY_DRAFT_KEY, ...data, editorType: data.editorType ?? 'tiptap', contentEditorTypes: data.contentEditorTypes ?? [data.editorType ?? 'tiptap'], savedAt: Date.now(), cloudSynced: false };
+  const draftData: StoryDraftData = { id: STORY_DRAFT_KEY, ...data, editorType: data.editorType ?? 'tiptap', contentEditorTypes: data.contentEditorTypes ?? [data.editorType ?? 'tiptap'], savedAt: Date.now(), cloudSynced: data.cloudSynced ?? false };
   if (await saveNativeDraft(draftData as unknown as Record<string, unknown>)) return;
   try {
     const db = await openDB();
@@ -387,12 +400,14 @@ export async function saveBlogDraftToDB(data: {
   category: string;
   tags: string;
   isPublished: boolean;
+  /** 写入时直接记录的同步状态（默认 false；保存到云端后补齐本地记录时传 true） */
+  cloudSynced?: boolean;
 }): Promise<void> {
   const draftData: BlogDraftData = {
     id: getBlogDraftKey(data.blogId), blogId: data.blogId, title: data.title, tiptapContent: data.tiptapContent,
     editorType: data.editorType, contentEditorTypes: data.contentEditorTypes,
     milkContent: data.milkContent,
-    tiptapContentJson: data.tiptapContentJson, category: data.category, tags: data.tags, isPublished: data.isPublished, savedAt: Date.now(), cloudSynced: false,
+    tiptapContentJson: data.tiptapContentJson, category: data.category, tags: data.tags, isPublished: data.isPublished, savedAt: Date.now(), cloudSynced: data.cloudSynced ?? false,
   };
   if (await saveNativeDraft(draftData as unknown as Record<string, unknown>)) return;
   try {
@@ -548,14 +563,16 @@ export async function saveStoryEditorDraftToDB(data: {
   coverCrop?: { x: number; y: number; width: number; height: number } | null;
   pendingCoverId?: string | null;
   photoIds: string[];
-  files: { id: string; file: File }[];
+  files: { id: string; file: File; takenAt?: string; assetId?: string }[];
+  /** 写入时直接记录的同步状态（默认 false；保存到云端后补齐本地记录时传 true） */
+  cloudSynced?: boolean;
 }): Promise<void> {
   const draftData: StoryEditorDraftData = {
     id: getStoryEditorDraftKey(data.storyId || data.draftId), storyId: data.storyId, title: data.title, tiptapContent: data.tiptapContent,
     editorType: data.editorType, contentEditorTypes: data.contentEditorTypes,
     milkContent: data.milkContent,
     tiptapContentJson: data.tiptapContentJson, isPublished: data.isPublished, createdAt: data.createdAt, coverPhotoId: data.coverPhotoId,
-    coverCrop: data.coverCrop, pendingCoverId: data.pendingCoverId, photoIds: data.photoIds, savedAt: Date.now(), cloudSynced: false, files: data.files,
+    coverCrop: data.coverCrop, pendingCoverId: data.pendingCoverId, photoIds: data.photoIds, savedAt: Date.now(), cloudSynced: data.cloudSynced ?? false, files: data.files,
   };
   if (await saveNativeDraft(draftData as unknown as Record<string, unknown>)) return;
   try {

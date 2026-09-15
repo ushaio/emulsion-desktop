@@ -434,6 +434,8 @@ export function UploadPage() {
         storageRuntime: settings.storageRuntime,
         storagePluginId: settings.storagePluginId,
         storagePath: settings.storagePath,
+        // `/` means the entered path is relative to the bucket root.
+        storagePathFull: useCustomPrefix,
         compressEnabled: settings.compressEnabled,
         compressionFormat: settings.compressionFormat,
         maxSizeMB: settings.maxSizeMB,

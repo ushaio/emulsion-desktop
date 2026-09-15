@@ -15,11 +15,15 @@ export interface StoriesTabProps {
   newStoryPhotoIds?: string[]
   editFromDraft?: StoryEditorDraftData | null
   onDraftConsumed?: () => void
+  /** 编辑器关闭后回调（未连接站点时用于切回草稿页签） */
+  onEditorClosed?: () => void
   refreshKey?: number
   createRequestKey?: number
   listPaneCollapsed?: boolean
   onToggleListPane?: () => void
   subTabNav?: ReactNode
+  /** 隐藏自带左栏列表（从草稿页签进入编辑时，左栏由草稿列表提供） */
+  hideListPane?: boolean
   /** 当前子页签是否可见（沉浸模式仅在编辑器可见时保持） */
   active?: boolean
   isImmersiveMode: boolean

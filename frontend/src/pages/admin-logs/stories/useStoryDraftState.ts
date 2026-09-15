@@ -49,7 +49,7 @@ interface UseStoryDraftStateResult {
 
 function restorePendingImages(files?: StoryEditorDraftData['files']): PendingImage[] {
   if (!files?.length) return []
-  return files.map((entry) => ({ id: entry.id, file: entry.file, previewUrl: URL.createObjectURL(entry.file), status: 'pending' as const, progress: 0, takenAt: entry.takenAt }))
+  return files.map((entry) => ({ id: entry.id, file: entry.file, previewUrl: URL.createObjectURL(entry.file), status: 'pending' as const, progress: 0, takenAt: entry.takenAt, assetId: entry.assetId }))
 }
 
 function createSnapshot(story: StoryDto): StorySnapshot {
@@ -99,10 +99,15 @@ export function useStoryDraftState({
   const editorSessionRef = useRef(editorSessionId)
   const draftWritesRef = useRef<Promise<void>>(Promise.resolve())
   const draftCloudIdsRef = useRef(new Map<string, string>())
+  // 离线续写时图库（allPhotos）为空，无法解析的 photoId 记录在此，
+  // 自动保存时合并回草稿，避免本地编辑把已关联照片冲掉
+  const preservedPhotoIdsRef = useRef<Set<string>>(new Set())
   const [draftSaved, setDraftSaved] = useState(false)
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
   const [initialStory, setInitialStory] = useState<StorySnapshot | null>(null)
   const [draftRestoreDialog, setDraftRestoreDialog] = useState<DraftRestoreDialogState>({ isOpen: false, draft: null, story: null })
+  // 图库是否已尝试加载（离线/空库时 allPhotos 恒为空，不能无限等待，否则编辑器打不开）
+  const [photosHydrated, setPhotosHydrated] = useState(false)
 
   const enqueueDraftWrite = useCallback((operation: () => Promise<void>) => {
     const write = draftWritesRef.current.then(operation)
@@ -152,6 +157,7 @@ export function useStoryDraftState({
 
   const resetDraftState = useCallback(() => {
     beginEditorSession()
+    preservedPhotoIdsRef.current.clear()
     setInitialStory(null)
     setLastSavedAt(null)
     setDraftRestoreDialog({ isOpen: false, draft: null, story: null })
@@ -165,6 +171,10 @@ export function useStoryDraftState({
     try {
       await enqueueDraftWrite(async () => {
         const cloudId = draftCloudIdsRef.current.get(currentStory.id)
+        const photoIds = Array.from(new Set([
+          ...currentStory.photos?.map((photo) => photo.id) || [],
+          ...preservedPhotoIdsRef.current,
+        ]))
         await saveStoryEditorDraftToDB({
           storyId: cloudId ?? (existingStory ? currentStory.id : undefined),
           draftId: cloudId || existingStory ? undefined : currentStory.id,
@@ -179,8 +189,8 @@ export function useStoryDraftState({
           coverPhotoId: currentStory.coverPhotoId,
           coverCrop: currentStory.coverCrop ?? null,
           pendingCoverId,
-          photoIds: currentStory.photos?.map((photo) => photo.id) || [],
-          files: pendingImages.map((image) => ({ id: image.id, file: image.file, takenAt: image.takenAt })),
+          photoIds,
+          files: pendingImages.map((image) => ({ id: image.id, file: image.file, takenAt: image.takenAt, assetId: image.assetId })),
         })
       })
       setLastSavedAt(Date.now())
@@ -194,7 +204,29 @@ export function useStoryDraftState({
   const markDraftSynced = useCallback(async (snapshot: StoryDto, storyId: string) => {
     await enqueueDraftWrite(async () => {
       const draft = await getStoryEditorDraftFromDB(storyId)
-      if (!draft || draft.title !== snapshot.title || draft.editorType !== snapshot.editorType
+      if (!draft) {
+        // 本地记录缺失（例如新建后 2 秒内直接保存，防抖自动保存还没落盘）：
+        // 用已保存的快照补齐本地记录并直接标记已同步，保持本地与云端 1:1 对应
+        await saveStoryEditorDraftToDB({
+          storyId,
+          title: snapshot.title,
+          editorType: snapshot.editorType,
+          contentEditorTypes: snapshot.contentEditorTypes,
+          tiptapContent: snapshot.tiptapContent,
+          tiptapContentJson: snapshot.tiptapContentJson ?? null,
+          milkContent: snapshot.milkContent ?? null,
+          isPublished: snapshot.isPublished,
+          createdAt: snapshot.createdAt,
+          coverPhotoId: snapshot.coverPhotoId,
+          coverCrop: snapshot.coverCrop ?? null,
+          pendingCoverId: null,
+          photoIds: snapshot.photos?.map((photo) => photo.id) || [],
+          files: [],
+          cloudSynced: true,
+        })
+        return
+      }
+      if (draft.title !== snapshot.title || draft.editorType !== snapshot.editorType
         || (draft.milkContent ?? null) !== (snapshot.milkContent ?? null)
         || draft.tiptapContent !== snapshot.tiptapContent
         || JSON.stringify(draft.tiptapContentJson ?? null) !== JSON.stringify(snapshot.tiptapContentJson ?? null)
@@ -212,6 +244,9 @@ export function useStoryDraftState({
     const restoredPhotos = draft.photoIds
       .map((id) => allPhotos.find((photo) => photo.id === id) || baseStory.photos?.find((photo) => photo.id === id))
       .filter((photo): photo is PhotoDto => Boolean(photo))
+    // 图库未加载（离线）时记录未解析的 photoId，防止自动保存把它们从草稿里冲掉
+    const restoredIds = new Set(restoredPhotos.map((photo) => photo.id))
+    preservedPhotoIdsRef.current = new Set(draft.photoIds.filter((id) => !restoredIds.has(id)))
 
     const restoredStory: StoryDto = {
       ...baseStory,
@@ -238,6 +273,7 @@ export function useStoryDraftState({
 
   const createStoryWithDraftCheck = useCallback(async () => {
     beginEditorSession()
+    preservedPhotoIdsRef.current.clear()
     const newStory = createEmptyStory()
     setInitialStory(createSnapshot(newStory))
     setPendingImages([])
@@ -251,6 +287,7 @@ export function useStoryDraftState({
     source: 'prompt' | 'draft' | 'database' = 'prompt',
   ) => {
     beginEditorSession()
+    preservedPhotoIdsRef.current.clear()
     const editableStory = { ...story }
     setInitialStory(createSnapshot(editableStory))
 
@@ -310,10 +347,15 @@ export function useStoryDraftState({
   }, [beginEditorSession, setCurrentStory, setStoryEditMode])
 
   useEffect(() => {
-    if (editFromDraft && allPhotos.length === 0) {
-      void loadAllPhotos()
+    if (!editFromDraft) {
+      // 草稿消费后重置，下一份草稿重新尝试加载图库（期间可能已连接站点）
+      if (photosHydrated) setPhotosHydrated(false)
+      return
     }
-  }, [allPhotos.length, editFromDraft, loadAllPhotos])
+    if (allPhotos.length === 0 && !photosHydrated) {
+      void loadAllPhotos().finally(() => setPhotosHydrated(true))
+    }
+  }, [allPhotos.length, editFromDraft, loadAllPhotos, photosHydrated])
 
   useEffect(() => {
     if (storyEditMode === 'editor' && allPhotos.length === 0) {
@@ -332,7 +374,7 @@ export function useStoryDraftState({
   }, [currentStory, isDirty, pendingImages.length, saveDraft, storyEditMode])
 
   useEffect(() => {
-    if (!editFromDraft || (editFromDraft.photoIds.length > 0 && allPhotos.length === 0)) return
+    if (!editFromDraft || (editFromDraft.photoIds.length > 0 && allPhotos.length === 0 && !photosHydrated)) return
 
     queueMicrotask(() => {
       beginEditorSession()
@@ -340,6 +382,9 @@ export function useStoryDraftState({
       const restoredPhotos = editFromDraft.photoIds
         .map((id) => allPhotos.find((photo) => photo.id === id))
         .filter((photo): photo is PhotoDto => Boolean(photo))
+      // 图库未加载（离线）时记录未解析的 photoId，防止自动保存把它们从草稿里冲掉
+      const restoredIds = new Set(restoredPhotos.map((photo) => photo.id))
+      preservedPhotoIdsRef.current = new Set(editFromDraft.photoIds.filter((id) => !restoredIds.has(id)))
 
       setCurrentStory({
         id: getNewStoryIdFromDraft(editFromDraft),
@@ -378,7 +423,7 @@ export function useStoryDraftState({
       notify(t('admin.restored_from_draft'), 'info')
       onDraftConsumed?.()
     })
-  }, [allPhotos, beginEditorSession, editFromDraft, notify, onDraftConsumed, setCurrentStory, setPendingCoverId, setPendingImages, setStoryEditMode, t])
+  }, [allPhotos, beginEditorSession, editFromDraft, notify, onDraftConsumed, photosHydrated, setCurrentStory, setPendingCoverId, setPendingImages, setStoryEditMode, t])
 
   return {
     editorSessionId,
