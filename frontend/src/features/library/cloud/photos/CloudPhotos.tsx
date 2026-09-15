@@ -18,6 +18,7 @@ import { resolveAssetUrl, type PhotoDto } from "@/lib/api";
 import { normalizePhotoCategories } from "@/lib/photoCategories";
 import { loadPersistentResource } from "@/lib/persistent-cache";
 import {
+  type DesktopCacheDomain,
   getPhotosPageCache,
   getPhotosPageCacheGeneration,
   invalidateDesktopCache,
@@ -37,8 +38,9 @@ import {
   GetPhotos,
   ToggleFeatured,
   ToggleShowFlag,
+  UpdatePhoto,
 } from "../../../../../wailsjs/go/main/App";
-import type { services, storage_plugins } from "../../../../../wailsjs/go/models";
+import { services, storage_plugins } from "../../../../../wailsjs/go/models";
 import { getErrorMessage } from "@/lib/auth-errors";
 import { ThumbGridSkeleton } from "@/components/admin/Skeleton";
 import { SimpleDeleteDialog } from "@/components/admin/SimpleDeleteDialog";
@@ -70,6 +72,7 @@ import {
   X,
   CheckSquare,
   ImageOff,
+  Pencil,
 } from "lucide-react";
 import {
   LibraryCountBar,
@@ -97,6 +100,7 @@ import {
 } from "./helpers";
 import { CloudPhotoFilters } from "./CloudPhotoFilters";
 import { PhotoGridCard } from "./PhotoGridCard";
+import { CloudBatchOrganizePanel } from "./CloudBatchOrganizePanel";
 
 interface CloudPhotosProps {
   selectionMode?: boolean;
@@ -192,6 +196,8 @@ export function CloudPhotos({
   const [batchDeleting, setBatchDeleting] = useState(false);
   const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false);
   const [batchUpdating, setBatchUpdating] = useState(false);
+  // 批量整理浮动面板（多选工具栏的「批量整理」按钮开关）
+  const [batchOrganizeOpen, setBatchOrganizeOpen] = useState(false);
   const [detailPhoto, setDetailPhoto] = useState<Photo | null>(null);
   // R2 存储源（桌面插件）照片的「移动到」功能
   const [storageSources, setStorageSources] = useState<storage_plugins.SourceDTO[]>([]);
@@ -627,6 +633,18 @@ export function CloudPhotos({
           ? ({ ...prev, ...updated } as Photo)
           : prev,
       );
+      // 详情栏新输入的分类并入本页筛选下拉
+      if (updated.category) {
+        setCategories((prev) =>
+          normalizePhotoCategories([
+            ...prev,
+            ...updated.category
+              .split(",")
+              .map((name) => name.trim())
+              .filter(Boolean),
+          ]),
+        );
+      }
       invalidateAfterLocalMutation([
         "overview",
         "equipment",
@@ -672,7 +690,11 @@ export function CloudPhotos({
     [photos, previewIndex],
   );
 
-  const tForPanel = useCallback((key: string) => t(key, language), [language]);
+  const tForPanel = useCallback(
+    (key: string, params?: Record<string, string | number>) =>
+      t(key, language, params),
+    [language],
+  );
 
   const notifyForPanel = useCallback(
     (message: string, type?: "success" | "error" | "info") => {
@@ -833,6 +855,105 @@ export function CloudPhotos({
     }
   };
 
+  // 批量整理面板：设置分类 / 加入精选。服务端暂无对应批量端点，
+  // 按小块并发调用单张更新接口（PATCH /admin/photos/:id），统计失败数。
+  const handleBatchUpdatePhotoFields = async (
+    params: { category?: string; isFeatured?: boolean },
+    patch: Partial<Photo>,
+    successLabel: string,
+    options?: { mergeCategories?: string[]; refresh?: boolean },
+  ) => {
+    if (selected.size === 0 || batchUpdating) return;
+    const ids = Array.from(selected);
+    const toastId = toast.loading(
+      language === "zh"
+        ? `正在更新 ${ids.length} 张照片...`
+        : `Updating ${ids.length} photos...`,
+    );
+    setBatchUpdating(true);
+    let failed = 0;
+    const CHUNK_SIZE = 5;
+    for (let start = 0; start < ids.length; start += CHUNK_SIZE) {
+      const results = await Promise.allSettled(
+        ids.slice(start, start + CHUNK_SIZE).map((id) =>
+          UpdatePhoto(id, services.UpdatePhotoParams.createFrom(params)),
+        ),
+      );
+      failed += results.filter((result) => result.status === "rejected").length;
+    }
+    if (failed === 0) {
+      const domains: DesktopCacheDomain[] = ["overview", "photos"];
+      if (options?.mergeCategories?.length) domains.push("categories");
+      if (options?.refresh) {
+        // 筛选视图（精选/分类）下照片可能不再匹配当前筛选，以服务端为准重新拉取
+        invalidateAfterLocalMutation(domains);
+        pageRef.current = 1;
+        await fetchPhotos(1, false);
+      } else {
+        setPhotos((prev) =>
+          prev.map((p) => (selected.has(p.id) ? ({ ...p, ...patch } as Photo) : p)),
+        );
+        invalidateAfterLocalMutation(domains);
+      }
+      if (options?.mergeCategories?.length) {
+        // 新分类并入本页筛选下拉（categories 持久缓存已在上面失效）
+        setCategories((prev) =>
+          normalizePhotoCategories([...prev, ...options.mergeCategories!]),
+        );
+      }
+      toast.success(
+        language === "zh"
+          ? `${successLabel}${ids.length} 张照片`
+          : `${successLabel} ${ids.length} photos`,
+        { id: toastId },
+      );
+    } else {
+      // 部分失败：以服务端数据为准，重新拉取当前列表
+      invalidateAfterLocalMutation(["overview", "photos"]);
+      pageRef.current = 1;
+      await fetchPhotos(1, false);
+      toast.error(
+        language === "zh"
+          ? `有 ${failed} 张照片更新失败`
+          : `${failed} photos failed to update`,
+        { id: toastId },
+      );
+    }
+    setBatchUpdating(false);
+  };
+
+  const handleBatchSetCategory = (category: string) =>
+    handleBatchUpdatePhotoFields(
+      { category },
+      { category },
+      language === "zh" ? "已设置分类：" : "Category set for",
+      {
+        // 新分类需并入筛选下拉；分类筛选激活时照片可能不再匹配，需刷新列表
+        mergeCategories: category
+          ? category
+              .split(",")
+              .map((name) => name.trim())
+              .filter(Boolean)
+          : [],
+        refresh: filters.category !== "全部",
+      },
+    );
+
+  const handleBatchSetFeatured = (featured: boolean) =>
+    handleBatchUpdatePhotoFields(
+      { isFeatured: featured },
+      { isFeatured: featured },
+      featured
+        ? language === "zh"
+          ? "已添加到精选："
+          : "Featured"
+        : language === "zh"
+          ? "已取消精选："
+          : "Unfeatured",
+      // 精选筛选激活时照片可能不再匹配，需刷新列表
+      { refresh: filters.featured === true },
+    );
+
   // 全选/取消全选当前已加载的照片
   const toggleSelectAllLoaded = () => {
     setSelected((prev) =>
@@ -842,7 +963,7 @@ export function CloudPhotos({
     );
   };
 
-  // Esc 清除多选（编辑弹层/大图预览/对话框打开时让位）
+  // Esc 清除多选（批量整理面板打开时先收起面板；输入框聚焦时不拦截）
   useEffect(() => {
     if (selected.size === 0) return;
     const onKey = (e: KeyboardEvent) => {
@@ -853,6 +974,12 @@ export function CloudPhotos({
         !batchDeleteDialogOpen &&
         !deleteTarget
       ) {
+        const target = e.target as HTMLElement | null;
+        if (target && target.tagName === "INPUT") return;
+        if (batchOrganizeOpen) {
+          setBatchOrganizeOpen(false);
+          return;
+        }
         setSelected(new Set());
       }
     };
@@ -864,7 +991,13 @@ export function CloudPhotos({
     previewPhoto,
     batchDeleteDialogOpen,
     deleteTarget,
+    batchOrganizeOpen,
   ]);
+
+  // 选中被清空（删除/筛选/取消）时同步收起批量整理面板
+  useEffect(() => {
+    if (selected.size === 0) setBatchOrganizeOpen(false);
+  }, [selected.size]);
 
   // 右侧信息栏键盘导航：←/→ 切换上一张/下一张选中照片，Esc 取消选中；
   // 输入控件聚焦时不拦截，接近已加载末尾时预取下一页
@@ -1195,7 +1328,7 @@ export function CloudPhotos({
 
       {/* 中间浏览工作区 + 底部状态栏 + 右侧详情栏。 */}
       <div className="flex min-h-0 flex-1">
-        <main className="flex min-w-0 flex-1 flex-col">
+        <main className="relative flex min-w-0 flex-1 flex-col">
           {/* 与本地资源库一致：搜索、筛选、视图和排序集中在内容工具栏。 */}
           <LibraryToolbar>
             <LibrarySearchInput
@@ -1417,6 +1550,13 @@ export function CloudPhotos({
                     onClick={toggleSelectAllLoaded}
                   />
                   <LibrarySelectionButton
+                    icon={Pencil}
+                    label={language === "zh" ? "批量整理" : "Batch organize"}
+                    title={language === "zh" ? "批量整理" : "Batch organize"}
+                    active={batchOrganizeOpen}
+                    onClick={() => setBatchOrganizeOpen((open) => !open)}
+                  />
+                  <LibrarySelectionButton
                     icon={Eye}
                     label={language === "zh" ? "设为展示" : "Show in gallery"}
                     title={language === "zh" ? "设为展示" : "Show in gallery"}
@@ -1476,6 +1616,20 @@ export function CloudPhotos({
             />
           </div>
 
+            {/* 批量整理浮动面板：与本地资源库一致，悬浮在内容区右下角 */}
+            {selected.size > 0 && batchOrganizeOpen && !selectionMode && (
+              <CloudBatchOrganizePanel
+                selectedCount={selected.size}
+                categories={categories}
+                language={language}
+                busy={batchUpdating}
+                onClose={() => setBatchOrganizeOpen(false)}
+                onSetCategory={(category) => void handleBatchSetCategory(category)}
+                onSetShowFlag={(show) => void handleBatchShowFlag(show)}
+                onSetFeatured={(featured) => void handleBatchSetFeatured(featured)}
+              />
+            )}
+
           <LibraryStatusBar>
             <div
               className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden whitespace-nowrap text-[11px]"
@@ -1508,6 +1662,7 @@ export function CloudPhotos({
 
         <PhotoInfoSidebar
           photo={sidebarPhoto}
+          categories={categories}
           token={token}
           t={tForPanel}
           notify={notifyForPanel}
