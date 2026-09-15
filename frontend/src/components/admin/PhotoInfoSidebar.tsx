@@ -20,7 +20,6 @@ import {
 import {
   resolveAssetUrl,
   reanalyzePhotoColors,
-  updatePhoto,
   ApiUnauthorizedError,
   type PhotoDto,
 } from "@/lib/api";
@@ -48,6 +47,8 @@ import {
   LIBRARY_EMPTY_VALUE,
 } from "@/components/ui/library/format";
 import type { Photo } from "@/types";
+import { UpdatePhoto } from "../../../wailsjs/go/main/App";
+import { services } from "../../../wailsjs/go/models";
 import { BrowserOpenURL } from "../../../wailsjs/runtime/runtime";
 
 interface Props {
@@ -172,12 +173,11 @@ export function PhotoInfoSidebar({
     if (!token || !photo || categorySaving) return;
     setCategorySaving(true);
     try {
-      const updated = await updatePhoto({
-        token,
-        id: photo.id,
-        patch: { category: categoryInput },
-      });
-      onSave(updated);
+      const updated = await UpdatePhoto(
+        photo.id,
+        services.UpdatePhotoParams.createFrom({ category: categoryInput }),
+      );
+      onSave(updated as unknown as PhotoDto);
       setCategoryEditing(false);
       notify(t("admin.notify_success"), "success");
     } catch (err) {
