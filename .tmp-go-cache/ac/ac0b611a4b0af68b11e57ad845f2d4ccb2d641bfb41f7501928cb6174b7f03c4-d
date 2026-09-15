@@ -1,8 +1,0 @@
-./decode_dynamic.go
-./decode_dynamic_windows.go
-./decode_wazero.go
-./exif.go
-./heic.go
-./isobmff.go
-./purego_windows.go
-./sequence.go

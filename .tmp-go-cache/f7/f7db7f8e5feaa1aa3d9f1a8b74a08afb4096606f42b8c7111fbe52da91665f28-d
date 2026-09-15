@@ -1,9 +1,0 @@
-./agent_extensions_app.go
-./app.go
-./draft_storage.go
-./main.go
-./photo_move.go
-./storage_source_sync.go
-./zine_storage.go
-./app_test.go
-./zine_storage_test.go

@@ -12,6 +12,7 @@
 # tooling caches
 /.tmp/
 /.tmp-go-modcache/
+/.tmp-go-cache/
 /.tmp-go-cache-ui/
 **/*.go.[0-9]*
 .pnpm-store/

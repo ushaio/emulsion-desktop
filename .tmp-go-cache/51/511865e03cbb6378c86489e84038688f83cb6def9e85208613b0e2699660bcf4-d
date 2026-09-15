@@ -1,7 +1,0 @@
-./avif.go
-./avif_dynamic.go
-./avif_wazero.go
-./exif.go
-./isobmff.go
-./orientation.go
-./purego_windows.go

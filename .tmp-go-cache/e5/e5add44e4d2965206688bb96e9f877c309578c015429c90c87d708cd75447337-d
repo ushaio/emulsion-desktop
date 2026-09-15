@@ -1,9 +1,0 @@
-./exifTypes.go
-./exifTypes_gen.go
-./gps.go
-./image.go
-./image_gen.go
-./meta.go
-./shutter_speed.go
-./utils.go
-./uuid.go

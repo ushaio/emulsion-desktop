@@ -1,6 +1,0 @@
-./func.go
-./gen.go
-./go_runtime.go
-./struct_amd64.go
-./syscall.go
-./syscall_windows.go

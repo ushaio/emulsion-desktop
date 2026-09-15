@@ -1,9 +1,0 @@
-./ai_local.go
-./db.go
-./drafts_local.go
-./models.go
-./zine_local.go
-./ai_local_test.go
-./drafts_local_test.go
-./models_test.go
-./zine_local_test.go
