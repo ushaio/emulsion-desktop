@@ -675,10 +675,10 @@ export function HomePage() {
       value: data?.lensCount ?? 0,
     },
     {
-      key: 'categories',
+      key: 'tags',
       icon: FolderOpen,
       label: <span className="text-[11px]" style={{ color: 'var(--muted-foreground)' }}>{t('admin.overview_categories', language)}</span>,
-      value: data?.categoryCount ?? 0,
+      value: data?.tagCount ?? 0,
     },
     {
       key: 'featured',

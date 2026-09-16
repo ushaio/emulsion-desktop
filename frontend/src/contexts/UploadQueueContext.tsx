@@ -43,7 +43,7 @@ interface UploadQueueContextType {
 
 interface UploadSettings {
   title: string
-  categories: string[]
+  tags: string[]
   albumIds?: string[]
   storyId?: string
   filmRollId?: string
@@ -79,7 +79,7 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
   const tasksRef = useRef<UploadTask[]>([])
   const activeCountRef = useRef(0)
   const startedIdsRef = useRef<Set<string>>(new Set())
-  // 设置按任务绑定：后加入的批次可能带不同设置（showFlag/分类/存储等），
+  // 设置按任务绑定：后加入的批次可能带不同设置（showFlag/标签/存储等），
   // 共用一个全局设置会让上一批还在排队的任务用新批次的设置上传。
   const taskSettingsRef = useRef<Map<string, UploadSettings>>(new Map())
   const hashesRef = useRef<Map<string, string>>(new Map())
@@ -192,7 +192,7 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
         {
           taskId: task.id,
           title: settings.title || task.fileName,
-          categories: settings.categories,
+          tags: settings.tags,
            filmRollId: settings.filmRollId || '',
             storageRuntime: 'desktop-plugin',
            storagePluginId: settings.storagePluginId || '',
@@ -219,7 +219,7 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
       } else if (result?.success && result.photo?.id) {
         const photoId = result.photo.id
         updateTask(task.id, { status: 'completed', progress: 100, photoId })
-        invalidateDesktopCache(['overview', 'equipment', 'photos', 'albums', 'categories', 'film-rolls', 'stories'])
+        invalidateDesktopCache(['overview', 'equipment', 'photos', 'albums', 'tags', 'film-rolls', 'stories'])
 
         // ── 补偿调用：关联相册/故事 ──────────────────────────────────
         // Go UploadSettings 不包含 albumIds/storyId，所以在此处通过 HTTP

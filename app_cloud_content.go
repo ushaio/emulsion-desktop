@@ -138,8 +138,8 @@ func (a *App) BatchUpdateShowFlag(photoIDs []string, showFlag bool) (*services.B
 func (a *App) GetAllPhotos() ([]services.PhotoDTO, error) {
 	return a.Photo.ListAll()
 }
-func (a *App) GetCategories() ([]string, error) {
-	return a.Photo.GetCategories()
+func (a *App) GetTags() ([]string, error) {
+	return a.Photo.GetTags()
 }
 func (a *App) GetCameras() ([]services.CameraDTO, error) {
 	return a.Photo.GetCameras()

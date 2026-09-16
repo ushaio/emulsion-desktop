@@ -5,20 +5,20 @@ import { CLOUD_PHOTO_FORMATS } from "./constants";
 
 export function CloudPhotoFilters({
   language,
-  categories,
-  category,
+  tags,
+  tag,
   photoType,
   fileFormats,
-  onCategoryChange,
+  onTagChange,
   onPhotoTypeChange,
   onFileFormatsChange,
 }: {
   language: "zh" | "en";
-  categories: string[];
-  category: string;
+  tags: string[];
+  tag: string;
   photoType: string | null;
   fileFormats: string[];
-  onCategoryChange: (value: string) => void;
+  onTagChange: (value: string) => void;
   onPhotoTypeChange: (value: string | null) => void;
   onFileFormatsChange: (value: string[]) => void;
 }) {
@@ -26,7 +26,7 @@ export function CloudPhotoFilters({
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const activeCount =
-    (category === "全部" ? 0 : 1) +
+    (tag === "全部" ? 0 : 1) +
     (photoType ? 1 : 0) +
     (fileFormats.length ? 1 : 0);
 
@@ -154,15 +154,15 @@ export function CloudPhotoFilters({
 
             <section>
               <h3 className="mb-2 text-[11px] font-semibold">
-                {language === "zh" ? "照片分类" : "Category"}
+                {language === "zh" ? "照片标签" : "Tag"}
               </h3>
               <div className="flex max-h-28 flex-wrap gap-1.5 overflow-auto pr-1">
-                {categories.map((item) => (
+                {tags.map((item) => (
                   <button
                     key={item}
                     type="button"
-                    onClick={() => onCategoryChange(item)}
-                    className={optionClass(category === item)}
+                    onClick={() => onTagChange(item)}
+                    className={optionClass(tag === item)}
                   >
                     {item === "全部"
                       ? language === "zh"
@@ -180,7 +180,7 @@ export function CloudPhotoFilters({
               type="button"
               disabled={activeCount === 0}
               onClick={() => {
-                onCategoryChange("全部");
+                onTagChange("全部");
                 onPhotoTypeChange(null);
                 onFileFormatsChange([]);
               }}

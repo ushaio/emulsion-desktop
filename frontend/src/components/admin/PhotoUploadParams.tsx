@@ -12,7 +12,7 @@ import {
   MapPinOff,
   Minimize2,
   ShieldCheck,
-  Tag,
+  Tags,
   Upload,
   type LucideIcon,
 } from 'lucide-react'
@@ -30,7 +30,7 @@ import type { CompressionFormat } from '@/lib/image-compress'
 
 export interface PhotoUploadSettings {
   title: string
-  categories: string[]
+  tags: string[]
   storyId?: string
   albumIds?: string[]
   filmRollId?: string
@@ -47,7 +47,7 @@ export interface PhotoUploadSettings {
 interface PhotoUploadParamsProps {
   mode: 'digital' | 'film'
   token: string | null
-  categories: string[]
+  tags: string[]
   t: (key: string) => string
   fileCount: number
   totalOriginalSize?: number
@@ -137,7 +137,7 @@ function SectionHeader({ icon: Icon, label }: { icon: LucideIcon; label: string 
 export function PhotoUploadParams({
   mode,
   token,
-  categories,
+  tags,
   t,
   fileCount,
   estimatedTotalSize,
@@ -153,7 +153,7 @@ export function PhotoUploadParams({
   embedded = false,
 }: PhotoUploadParamsProps) {
   const [uploadTitle, setUploadTitle] = useState(initialSettings?.title ?? '')
-  const [uploadCategories, setUploadCategories] = useState<string[]>(initialSettings?.categories ?? [])
+  const [uploadTags, setUploadTags] = useState<string[]>(initialSettings?.tags ?? [])
 
   const [uploadStoryId, setUploadStoryId] = useState(initialSettings?.storyId ?? '')
   const [uploadStoryTitle, setUploadStoryTitle] = useState('')
@@ -258,12 +258,12 @@ export function PhotoUploadParams({
     }
   }, [showFilmRollSelector, loadFilmRolls])
 
-  const categoryOptions = useMemo(
+  const tagOptions = useMemo(
     () =>
-      categories
+      tags
         .filter((c) => c !== 'all' && c !== '全部')
         .map((c) => ({ value: c, label: c })),
-    [categories]
+    [tags]
   )
 
   const albumOptions = useMemo(
@@ -282,7 +282,7 @@ export function PhotoUploadParams({
 
     onSettingsChange({
       title: uploadTitle,
-      categories: uploadCategories,
+      tags: uploadTags,
       storyId: uploadStoryId || undefined,
       albumIds: uploadAlbumIds.length ? uploadAlbumIds : undefined,
       filmRollId: mode === 'film' ? (uploadFilmRollId || undefined) : undefined,
@@ -297,7 +297,7 @@ export function PhotoUploadParams({
     })
   }, [
     uploadTitle,
-    uploadCategories,
+    uploadTags,
     uploadStoryId,
     uploadAlbumIds,
     uploadFilmRollId,
@@ -318,7 +318,7 @@ export function PhotoUploadParams({
       <div className="space-y-6">
         {/* Section: Basic Info */}
         <section>
-          <SectionHeader icon={Tag} label={t('admin.upload_section_basic')} />
+          <SectionHeader icon={Tags} label={t('admin.upload_section_basic')} />
           <div className="space-y-4">
           {/* Title */}
           <div>
@@ -332,14 +332,14 @@ export function PhotoUploadParams({
             />
           </div>
 
-          {/* Categories & Albums - 2 column grid */}
+          {/* Tags & Albums - 2 column grid */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-medium text-muted-foreground mb-1.5">{t('admin.categories')}</label>
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1.5">{t('admin.tags')}</label>
               <AdminMultiSelect
-                values={uploadCategories}
-                options={categoryOptions}
-                onChange={setUploadCategories}
+                values={uploadTags}
+                options={tagOptions}
+                onChange={setUploadTags}
                 placeholder={t('admin.search_create')}
                 inputPlaceholder={t('admin.search_create')}
                 allowCreate

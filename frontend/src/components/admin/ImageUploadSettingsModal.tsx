@@ -22,9 +22,9 @@ export interface UploadSettings {
   compressionFormat?: CompressionFormat
   showFlag?: boolean
   stripGps?: boolean
-  categories?: string[]
+  tags?: string[]
   albumIds?: string[]
-  category?: string
+
   albumId?: string
 }
 
@@ -38,14 +38,12 @@ interface ImageUploadSettingsModalProps {
   initialSettings?: UploadSettings
   confirmLabel?: string
   settings?: Record<string, string> | null
-  categories?: string[]
+  tags?: string[]
   currentStoryId?: string
 }
 
-function getInitialCategories(initialSettings?: UploadSettings) {
-  if (initialSettings?.categories?.length) return initialSettings.categories
-  if (initialSettings?.category?.trim()) return [initialSettings.category.trim()]
-  return []
+function getInitialTags(initialSettings?: UploadSettings) {
+  return initialSettings?.tags?.length ? initialSettings.tags : []
 }
 
 function getInitialAlbumIds(initialSettings?: UploadSettings) {
@@ -59,7 +57,7 @@ function getInitialUploadSettings(initialSettings?: UploadSettings): PhotoUpload
   const compressionFormat = normalizeCompressionFormat(initialSettings?.compressionFormat)
   return {
     title: initialSettings?.title ?? '',
-    categories: getInitialCategories(initialSettings),
+    tags: getInitialTags(initialSettings),
     storyId: initialSettings?.storyId,
     albumIds: getInitialAlbumIds(initialSettings),
     storageSourceId: initialSettings?.storageSourceId,
@@ -167,7 +165,7 @@ function ImageUploadSettingsModalContent({
   token,
   initialSettings,
   confirmLabel,
-  categories = [],
+  tags = [],
   currentStoryId,
 }: ImageUploadSettingsModalProps) {
   const [uploadSettings, setUploadSettings] = useState<PhotoUploadSettings>(() => getInitialUploadSettings(initialSettings))
@@ -180,7 +178,7 @@ function ImageUploadSettingsModalContent({
       compressionFormat: uploadSettings.compressionFormat,
       showFlag: uploadSettings.showFlag,
       stripGps: uploadSettings.privacyStripEnabled,
-      categories: uploadSettings.categories,
+      tags: uploadSettings.tags,
       albumIds: uploadSettings.albumIds,
     }
 
@@ -235,7 +233,7 @@ function ImageUploadSettingsModalContent({
         <PhotoUploadParams
           mode="digital"
           token={token}
-          categories={categories}
+          tags={tags}
           t={t}
           fileCount={pendingCount}
           totalOriginalSize={0}

@@ -7,12 +7,12 @@
 import React, { createContext, useContext, useCallback, useState, useEffect } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
-import { GetCategories, GetSettings } from '../../../wailsjs/go/main/App'
+import { GetTags, GetSettings } from '../../../wailsjs/go/main/App'
 
 interface AdminContextType {
   handleUnauthorized: () => void
   settings: Record<string, string> | null
-  categories: string[]
+  tags: string[]
 }
 
 const AdminContext = createContext<AdminContextType | null>(null)
@@ -23,7 +23,7 @@ export function useAdmin() {
     return {
       handleUnauthorized: () => {},
       settings: null as Record<string, string> | null,
-      categories: [] as string[],
+      tags: [] as string[],
     }
   }
   return context
@@ -33,7 +33,7 @@ export function AdminLogsProvider({ children }: { children: React.ReactNode }) {
   const { logout } = useAuth()
   const navigate = useNavigate()
   const [settings, setSettings] = useState<Record<string, string> | null>(null)
-  const [categories, setCategories] = useState<string[]>([])
+  const [tags, setTags] = useState<string[]>([])
 
   const handleUnauthorized = useCallback(() => {
     logout()
@@ -47,14 +47,14 @@ export function AdminLogsProvider({ children }: { children: React.ReactNode }) {
         setSettings(s || {})
       } catch {}
       try {
-        const c = await GetCategories()
-        setCategories(c || [])
+        const c = await GetTags()
+        setTags(c || [])
       } catch {}
     })()
   }, [])
 
   return (
-    <AdminContext.Provider value={{ handleUnauthorized, settings, categories }}>
+    <AdminContext.Provider value={{ handleUnauthorized, settings, tags }}>
       {children}
     </AdminContext.Provider>
   )

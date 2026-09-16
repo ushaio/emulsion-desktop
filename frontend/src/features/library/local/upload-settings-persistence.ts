@@ -8,7 +8,7 @@ export const DEFAULT_LOCAL_LIBRARY_UPLOAD_SETTINGS: UploadSettings = {
   compressionFormat: 'avif',
   showFlag: true,
   stripGps: false,
-  categories: [],
+  tags: [],
   albumIds: [],
 }
 
@@ -53,9 +53,8 @@ export function normalizeLocalLibraryUploadSettings(value: unknown): UploadSetti
     maxSizeMB: optionalPositiveNumber(stored.maxSizeMB),
     showFlag: optionalBoolean(stored.showFlag) ?? DEFAULT_LOCAL_LIBRARY_UPLOAD_SETTINGS.showFlag,
     stripGps: optionalBoolean(stored.stripGps) ?? DEFAULT_LOCAL_LIBRARY_UPLOAD_SETTINGS.stripGps,
-    categories: stringArray(stored.categories) ?? DEFAULT_LOCAL_LIBRARY_UPLOAD_SETTINGS.categories,
+    tags: stringArray(stored.tags) ?? DEFAULT_LOCAL_LIBRARY_UPLOAD_SETTINGS.tags,
     albumIds: stringArray(stored.albumIds) ?? DEFAULT_LOCAL_LIBRARY_UPLOAD_SETTINGS.albumIds,
-    category: optionalString(stored.category),
     albumId: optionalString(stored.albumId),
   }
 }

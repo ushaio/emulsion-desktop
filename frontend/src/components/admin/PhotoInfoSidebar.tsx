@@ -61,8 +61,8 @@ interface Props {
   onDelete: (photo: Photo) => void;
   onSave: (photo: PhotoDto) => void;
   onUnauthorized: () => void;
-  /** 云端已有的全部分类，用于「添加分类」下拉匹配（与本地资源库标签一致） */
-  categories?: string[];
+  /** 云端已有的全部标签，用于「添加标签」下拉匹配（与本地资源库标签一致） */
+  tags?: string[];
 }
 
 /** 「照片信息」两列网格里的一格：短字段（尺寸 / 体积 / 日期 / 存储提供商）。 */
@@ -96,14 +96,14 @@ export function PhotoInfoSidebar({
   onDelete,
   onSave,
   onUnauthorized,
-  categories = [],
+  tags = [],
 }: Props) {
   const [reanalyzing, setReanalyzing] = useState(false);
-  // 分类交互与本地资源库的标签一致：chip + 虚线「添加」chip 原地变输入框 + 下拉匹配
-  const [addingCategory, setAddingCategory] = useState(false);
-  const [categoryQuery, setCategoryQuery] = useState("");
-  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
-  const [categorySaving, setCategorySaving] = useState(false);
+  // 标签交互与本地资源库的标签一致：chip + 虚线「添加」chip 原地变输入框 + 下拉匹配
+  const [addingTag, setAddingTag] = useState(false);
+  const [tagQuery, setTagQuery] = useState("");
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
+  const [tagSaving, setTagSaving] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [shootingOpen, setShootingOpen] = useState(true);
   const [infoOpen, setInfoOpen] = useState(true);
@@ -112,13 +112,13 @@ export function PhotoInfoSidebar({
   const [realThumbUrl, setRealThumbUrl] = useState<string | null>(null);
   const [realOriginalUrl, setRealOriginalUrl] = useState<string | null>(null);
   const copyTimerRef = useRef<number | null>(null);
-  const categoryInputRef = useRef<HTMLInputElement>(null);
+  const tagInputRef = useRef<HTMLInputElement>(null);
 
-  // 切换照片时收起添加分类的输入态，避免残留上一张的输入
+  // 切换照片时收起添加标签的输入态，避免残留上一张的输入
   useEffect(() => {
-    setAddingCategory(false);
-    setCategoryQuery("");
-    setCategoryMenuOpen(false);
+    setAddingTag(false);
+    setTagQuery("");
+    setTagMenuOpen(false);
   }, [photo?.id]);
 
   useEffect(() => {
@@ -170,41 +170,41 @@ export function PhotoInfoSidebar({
     }
   };
 
-  /* ── 分类（对齐本地资源库的标签交互）──
-     云端 category 是逗号分隔的多分类字符串；增删单个分类后整体替换保存。 */
+  /* ── 标签（对齐本地资源库的标签交互）──
+     云端 tags 是逗号分隔的多标签字符串；增删单个标签后整体替换保存。 */
 
-  const photoCategories = useMemo(
+  const photoTags = useMemo(
     () =>
-      photo?.category
-        ? photo.category
+      photo?.tags
+        ? photo.tags
             .split(",")
             .map((name) => name.trim())
             .filter(Boolean)
         : [],
-    [photo?.category],
+    [photo?.tags],
   );
 
-  const assignedCategorySet = useMemo(
-    () => new Set(photoCategories.map((name) => name.toLocaleLowerCase())),
-    [photoCategories],
+  const assignedTagSet = useMemo(
+    () => new Set(photoTags.map((name) => name.toLocaleLowerCase())),
+    [photoTags],
   );
 
-  const matchingCategories = useMemo(() => {
-    const query = categoryQuery.trim().toLocaleLowerCase();
-    return categories.filter(
+  const matchingTags = useMemo(() => {
+    const query = tagQuery.trim().toLocaleLowerCase();
+    return tags.filter(
       (name) =>
-        !assignedCategorySet.has(name.toLocaleLowerCase()) &&
+        !assignedTagSet.has(name.toLocaleLowerCase()) &&
         (!query || name.toLocaleLowerCase().includes(query)),
     );
-  }, [assignedCategorySet, categories, categoryQuery]);
+  }, [assignedTagSet, tags, tagQuery]);
 
-  const saveCategories = async (next: string[]) => {
-    if (!token || !photo || categorySaving) return;
-    setCategorySaving(true);
+  const saveTags = async (next: string[]) => {
+    if (!token || !photo || tagSaving) return;
+    setTagSaving(true);
     try {
       const updated = await UpdatePhoto(
         photo.id,
-        services.UpdatePhotoParams.createFrom({ category: next.join(",") }),
+        services.UpdatePhotoParams.createFrom({ tags: next.join(",") }),
       );
       onSave(updated as unknown as PhotoDto);
       notify(t("admin.notify_success"), "success");
@@ -213,29 +213,29 @@ export function PhotoInfoSidebar({
       else
         notify(err instanceof Error ? err.message : t("common.error"), "error");
     } finally {
-      setCategorySaving(false);
+      setTagSaving(false);
     }
   };
 
-  const addCategory = async (name?: string) => {
-    if (!photo || categorySaving) return;
-    const query = categoryQuery.trim();
-    // 优先用点选的名称；否则匹配已有分类（忽略大小写）；再否则创建新分类
+  const addTag = async (name?: string) => {
+    if (!photo || tagSaving) return;
+    const query = tagQuery.trim();
+    // 优先用点选的名称；否则匹配已有标签（忽略大小写）；再否则创建新标签
     const target =
       name ||
-      categories.find(
+      tags.find(
         (item) => item.toLocaleLowerCase() === query.toLocaleLowerCase(),
       ) ||
       query;
     if (!target) return;
-    if (assignedCategorySet.has(target.toLocaleLowerCase())) {
-      setCategoryQuery("");
+    if (assignedTagSet.has(target.toLocaleLowerCase())) {
+      setTagQuery("");
       return;
     }
-    await saveCategories([...photoCategories, target]);
-    setCategoryQuery("");
-    setCategoryMenuOpen(false);
-    categoryInputRef.current?.focus();
+    await saveTags([...photoTags, target]);
+    setTagQuery("");
+    setTagMenuOpen(false);
+    tagInputRef.current?.focus();
   };
 
   if (!photo) {
@@ -363,10 +363,10 @@ export function PhotoInfoSidebar({
               </span>
             </button>
 
-            {/* 分类（对齐本地资源库的标签交互）/ 胶卷 pill（云端专属元数据） */}
+            {/* 标签（对齐本地资源库的标签交互）/ 胶卷 pill（云端专属元数据） */}
             <div className="relative mt-2 w-full">
               <div className="flex flex-wrap items-center gap-1.5">
-                {photoCategories.map((name) => (
+                {photoTags.map((name) => (
                   <span
                     key={name}
                     className="group/cat inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[10px]"
@@ -388,11 +388,11 @@ export function PhotoInfoSidebar({
                     </span>
                     <button
                       type="button"
-                      disabled={categorySaving}
+                      disabled={tagSaving}
                       aria-label={`${t("admin.remove")} ${name}`}
                       onClick={() =>
-                        void saveCategories(
-                          photoCategories.filter((item) => item !== name),
+                        void saveTags(
+                          photoTags.filter((item) => item !== name),
                         )
                       }
                       className="flex size-3.5 shrink-0 items-center justify-center rounded-full opacity-0 transition-opacity hover:bg-destructive/15 group-hover/cat:opacity-100 disabled:opacity-50"
@@ -404,38 +404,38 @@ export function PhotoInfoSidebar({
                 ))}
 
                 {/* 添加入口：默认虚线 chip，点击原地变成 chip 大小的内联输入框 */}
-                {addingCategory ? (
+                {addingTag ? (
                   <input
-                    ref={categoryInputRef}
+                    ref={tagInputRef}
                     autoFocus
-                    value={categoryQuery}
-                    disabled={categorySaving}
-                    onFocus={() => setCategoryMenuOpen(true)}
+                    value={tagQuery}
+                    disabled={tagSaving}
+                    onFocus={() => setTagMenuOpen(true)}
                     onChange={(event) => {
-                      setCategoryQuery(event.target.value);
-                      setCategoryMenuOpen(true);
+                      setTagQuery(event.target.value);
+                      setTagMenuOpen(true);
                     }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
                         event.preventDefault();
-                        void addCategory();
+                        void addTag();
                       }
                       if (event.key === "Escape") {
                         event.preventDefault();
-                        setCategoryQuery("");
-                        setCategoryMenuOpen(false);
-                        setAddingCategory(false);
+                        setTagQuery("");
+                        setTagMenuOpen(false);
+                        setAddingTag(false);
                       }
                     }}
                     onBlur={() => {
                       /* 失焦时已输入则提交，否则直接收回 chip */
-                      if (categoryQuery.trim()) void addCategory();
+                      if (tagQuery.trim()) void addTag();
                       else {
-                        setCategoryMenuOpen(false);
-                        setAddingCategory(false);
+                        setTagMenuOpen(false);
+                        setAddingTag(false);
                       }
                     }}
-                    placeholder={t("admin.category_add_placeholder")}
+                    placeholder={t("admin.tag_add_placeholder")}
                     className="h-[22px] w-36 rounded-full border bg-transparent px-2.5 text-[10px] outline-none transition-colors focus:border-primary disabled:opacity-40"
                     style={{
                       borderColor: "var(--border)",
@@ -445,10 +445,10 @@ export function PhotoInfoSidebar({
                 ) : (
                   <button
                     type="button"
-                    disabled={categorySaving}
-                    title={t("admin.category")}
-                    aria-label={t("admin.category")}
-                    onClick={() => setAddingCategory(true)}
+                    disabled={tagSaving}
+                    title={t("admin.tag")}
+                    aria-label={t("admin.tag")}
+                    onClick={() => setAddingTag(true)}
                     className="inline-flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-[10px] transition-colors hover:bg-secondary disabled:opacity-40"
                     style={{
                       borderColor: "var(--border)",
@@ -476,10 +476,10 @@ export function PhotoInfoSidebar({
                 )}
               </div>
 
-              {/* 添加分类下拉：匹配已有分类 + 输入内容不存在时创建 */}
-              {addingCategory &&
-                categoryMenuOpen &&
-                (matchingCategories.length > 0 || categoryQuery.trim()) && (
+              {/* 添加标签下拉：匹配已有标签 + 输入内容不存在时创建 */}
+              {addingTag &&
+                tagMenuOpen &&
+                (matchingTags.length > 0 || tagQuery.trim()) && (
                   <div
                     className="absolute inset-x-0 top-full z-20 mt-1 max-h-44 overflow-y-auto rounded-lg border p-1 shadow-lg"
                     style={{
@@ -487,12 +487,12 @@ export function PhotoInfoSidebar({
                       backgroundColor: "var(--popover)",
                     }}
                   >
-                    {matchingCategories.map((name) => (
+                    {matchingTags.map((name) => (
                       <button
                         key={name}
                         type="button"
                         onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => void addCategory(name)}
+                        onClick={() => void addTag(name)}
                         className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[11px] transition-colors hover:bg-secondary"
                       >
                         <TagIcon
@@ -503,22 +503,22 @@ export function PhotoInfoSidebar({
                         <span className="truncate">{name}</span>
                       </button>
                     ))}
-                    {categoryQuery.trim() &&
-                      !categories.some(
+                    {tagQuery.trim() &&
+                      !tags.some(
                         (item) =>
                           item.toLocaleLowerCase() ===
-                          categoryQuery.trim().toLocaleLowerCase(),
+                          tagQuery.trim().toLocaleLowerCase(),
                       ) && (
                         <button
                           type="button"
                           onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => void addCategory()}
+                          onClick={() => void addTag()}
                           className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors hover:bg-secondary"
                           style={{ color: "var(--primary)" }}
                         >
                           <Plus size={11} />
-                          {t("admin.category_create", {
-                            name: categoryQuery.trim(),
+                          {t("admin.tag_create", {
+                            name: tagQuery.trim(),
                           })}
                         </button>
                       )}

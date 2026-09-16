@@ -980,7 +980,7 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
         checkDuplicate: true,
       })), {
         title: settings.title || '',
-        categories: settings.categories || [],
+        tags: settings.tags || [],
         albumIds: settings.albumIds,
         storyId: settings.storyId,
         storageSourceId: settings.storageSourceId,
@@ -1044,7 +1044,7 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
         checkDuplicate: true,
       }], {
         title: settings.title || '',
-        categories: settings.categories || [],
+        tags: settings.tags || [],
         albumIds: settings.albumIds,
         storyId: settings.storyId,
         storageSourceId: settings.storageSourceId,

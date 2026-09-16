@@ -311,7 +311,7 @@ export function CloudFilmRolls() {
       const resolvedType = photo.photoType ?? (photo.filmRollId ? 'film' : 'digital')
       if (photoTypeFilter !== 'all' && resolvedType !== photoTypeFilter) return false
       if (!query) return true
-      return [photo.title, photo.category].some(value => value?.toLowerCase().includes(query))
+      return [photo.title, photo.tags].some(value => value?.toLowerCase().includes(query))
     })
   }, [currentRoll?.id, photoSelectorSearch, photoTypeFilter, photos, rollPhotoIds])
 

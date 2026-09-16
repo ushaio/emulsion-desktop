@@ -53,7 +53,7 @@ type PhotoDTO struct {
 	Orientation         *int       `json:"orientation,omitempty"`
 	Software            *string    `json:"software,omitempty"`
 	GPS                 *string    `json:"gps,omitempty"`
-	Category            string     `json:"category"`
+	Tags                string     `json:"tags"`
 	PhotoType           string     `json:"photoType"`
 	FilmRollID          *string    `json:"filmRollId,omitempty"`
 	FilmRollName        *string    `json:"filmRollName,omitempty"`
@@ -124,7 +124,7 @@ type LensDTO struct {
 }
 
 type ListPhotosParams struct {
-	Category  string   `json:"category"`
+	Tag        string   `json:"tag"`
 	AlbumID   string   `json:"albumId"`
 	CameraID  string   `json:"cameraId"`
 	LensID    string   `json:"lensId"`
@@ -146,7 +146,7 @@ type UpdatePhotoParams struct {
 	IsFeatured *bool      `json:"isFeatured,omitempty"`
 	ShowFlag   *bool      `json:"showFlag,omitempty"`
 	TakenAt    *time.Time `json:"takenAt,omitempty"`
-	Category   *string    `json:"category,omitempty"`
+	Tags       *string    `json:"tags,omitempty"`
 }
 
 type DeletePhotoParams struct {
@@ -189,8 +189,8 @@ func (s *PhotoService) List(params ListPhotosParams) (*PaginatedResponse[PhotoDT
 	}
 
 	q := url.Values{}
-	if params.Category != "" && params.Category != "全部" {
-		q.Set("category", params.Category)
+	if params.Tag != "" && params.Tag != "全部" {
+		q.Set("tag", params.Tag)
 	}
 	if params.AlbumID != "" {
 		q.Set("albumId", params.AlbumID)
@@ -346,15 +346,15 @@ func (s *PhotoService) MoveMetadata(moves []MoveMetadataItem) (*BatchResult, err
 	return &result, nil
 }
 
-func (s *PhotoService) GetCategories() ([]string, error) {
+func (s *PhotoService) GetTags() ([]string, error) {
 	if err := s.checkReady(); err != nil {
 		return nil, err
 	}
-	var categories []string
-	if err := s.proxy.GET("/categories", &categories); err != nil {
+	var tags []string
+	if err := s.proxy.GET("/tags", &tags); err != nil {
 		return nil, err
 	}
-	return categories, nil
+	return tags, nil
 }
 
 func (s *PhotoService) GetCameras() ([]CameraDTO, error) {

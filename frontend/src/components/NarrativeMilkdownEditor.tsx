@@ -26,7 +26,7 @@ const NarrativeMilkdownEditor = forwardRef<MilkdownEditorHandle, NarrativeMilkdo
   }, [cdnDomain, photos])
   const onUpload = useCallback(async (file: File) => {
     if (!token) throw new Error(language === 'zh' ? '请先连接站点，再上传图片。' : 'Connect to your site before uploading images.')
-    const photo = await uploadPhoto({ token, file, title: file.name, category: [], origin_flag: 'desktop' })
+    const photo = await uploadPhoto({ token, file, title: file.name, tags: [], origin_flag: 'desktop' })
     if (!photo.url) throw new Error(language === 'zh' ? '图片地址不可用。' : 'The image URL is unavailable.')
     onPhotoUploaded?.(photo)
     return photo.url

@@ -22,7 +22,7 @@ type OverviewDTO struct {
 	CommentCount  int64 `json:"commentCount"`
 	CameraCount   int64 `json:"cameraCount"`
 	LensCount     int64 `json:"lensCount"`
-	CategoryCount int64 `json:"categoryCount"`
+	TagCount      int64 `json:"tagCount"`
 
 	FeaturedCount int64 `json:"featuredCount"`
 	HiddenCount   int64 `json:"hiddenCount"`

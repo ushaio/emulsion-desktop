@@ -15,7 +15,7 @@ export type DataRevisionKey =
   | 'equipment'
   | 'photos'
   | 'albums'
-  | 'categories'
+  | 'tags'
   | 'film-rolls'
   | 'stories'
   | 'friends'

@@ -12,11 +12,11 @@ import {
 
 interface Props {
   selectedCount: number;
-  categories: string[];
+  tags: string[];
   language: string;
   busy: boolean;
   onClose: () => void;
-  onSetCategory: (category: string) => void;
+  onSetTag: (tag: string) => void;
   onSetShowFlag: (show: boolean) => void;
   onSetFeatured: (featured: boolean) => void;
 }
@@ -71,41 +71,41 @@ function Section({
 /**
  * 云端资源库多选照片的「批量整理」浮动面板。
  * 交互与本地资源库的 LocalAssetBatchDetails 一致：
- * 悬浮在内容区右下角，支持批量设置分类、画廊显示/隐藏与精选。
+ * 悬浮在内容区右下角，支持批量设置标签、画廊显示/隐藏与精选。
  *
- * 分类交互：点击分类列表加入输入框（chip），chip 上的 x 移除；
- * 也可直接输入新分类回车加入；点「应用」后把输入框内的分类
+ * 标签交互：点击标签列表加入输入框（chip），chip 上的 x 移除；
+ * 也可直接输入新标签回车加入；点「应用」后把输入框内的标签
  * （逗号拼接，服务端整体替换）批量应用到全部选中照片。
  */
 export function CloudBatchOrganizePanel({
   selectedCount,
-  categories,
+  tags,
   language,
   busy,
   onClose,
-  onSetCategory,
+  onSetTag,
   onSetShowFlag,
   onSetFeatured,
 }: Props) {
   const zh = language === "zh";
-  const [categoryOpen, setCategoryOpen] = useState(true);
+  const [tagOpen, setTagOpen] = useState(true);
   const [galleryOpen, setGalleryOpen] = useState(true);
   const [featuredOpen, setFeaturedOpen] = useState(true);
-  // 输入框内的分类 chips（尚未应用到照片）
-  const [pendingCategories, setPendingCategories] = useState<string[]>([]);
-  const [categoryInput, setCategoryInput] = useState("");
+  // 输入框内的标签 chips（尚未应用到照片）
+  const [pendingTags, setPendingTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState("");
 
-  const addPendingCategory = (name: string) => {
+  const addPendingTag = (name: string) => {
     const trimmed = name.trim();
     if (!trimmed) return;
-    setPendingCategories((prev) =>
+    setPendingTags((prev) =>
       prev.includes(trimmed) ? prev : [...prev, trimmed],
     );
   };
 
-  const removePendingCategory = (name: string) => {
+  const removePendingTag = (name: string) => {
     if (busy) return;
-    setPendingCategories((prev) => prev.filter((item) => item !== name));
+    setPendingTags((prev) => prev.filter((item) => item !== name));
   };
 
   return (
@@ -140,20 +140,20 @@ export function CloudBatchOrganizePanel({
         </button>
       </div>
 
-      {/* ── 分类：点击/输入加入输入框，点「应用」批量生效 ── */}
+      {/* ── 标签：点击/输入加入输入框，点「应用」批量生效 ── */}
       <Section
-        label={zh ? "分类" : "Category"}
+        label={zh ? "标签" : "Tags"}
         icon={TagIcon}
-        open={categoryOpen}
-        onToggle={() => setCategoryOpen((v) => !v)}
+        open={tagOpen}
+        onToggle={() => setTagOpen((v) => !v)}
       >
         <div className="space-y-3">
-          {/* 分类输入框：chips + 文本输入 */}
+          {/* 标签输入框：chips + 文本输入 */}
           <div
             className="flex min-h-9 flex-wrap items-center gap-1 rounded-md border px-1.5 py-1"
             style={{ borderColor: "var(--border)" }}
           >
-            {pendingCategories.map((name) => (
+            {pendingTags.map((name) => (
               <span
                 key={name}
                 className="flex max-w-full items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-[10px]"
@@ -163,7 +163,7 @@ export function CloudBatchOrganizePanel({
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => removePendingCategory(name)}
+                  onClick={() => removePendingTag(name)}
                   title={zh ? `移除 ${name}` : `Remove ${name}`}
                   aria-label={zh ? `移除 ${name}` : `Remove ${name}`}
                   className="flex shrink-0 items-center rounded transition-colors hover:opacity-70 disabled:opacity-50"
@@ -174,33 +174,33 @@ export function CloudBatchOrganizePanel({
               </span>
             ))}
             <input
-              value={categoryInput}
+              value={tagInput}
               disabled={busy}
-              onChange={(event) => setCategoryInput(event.target.value)}
+              onChange={(event) => setTagInput(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === "," || event.key === "，") {
-                  // 回车/逗号：把输入内容作为新分类加入输入框
+                  // 回车/逗号：把输入内容作为新标签加入输入框
                   event.preventDefault();
-                  if (!busy && categoryInput.trim()) {
-                    addPendingCategory(categoryInput);
-                    setCategoryInput("");
+                  if (!busy && tagInput.trim()) {
+                    addPendingTag(tagInput);
+                    setTagInput("");
                   }
                 } else if (
                   event.key === "Backspace" &&
-                  !categoryInput &&
-                  pendingCategories.length > 0 &&
+                  !tagInput &&
+                  pendingTags.length > 0 &&
                   !busy
                 ) {
                   // 退格删除最后一个 chip
                   event.preventDefault();
-                  setPendingCategories((prev) => prev.slice(0, -1));
+                  setPendingTags((prev) => prev.slice(0, -1));
                 }
               }}
               placeholder={
-                pendingCategories.length === 0
+                pendingTags.length === 0
                   ? zh
-                    ? "输入新分类，回车加入"
-                    : "Type a category, Enter to add"
+                    ? "输入新标签，回车加入"
+                    : "Type a tag, Enter to add"
                   : ""
               }
               className="h-6 min-w-20 flex-1 bg-transparent text-[11px] outline-none"
@@ -208,29 +208,29 @@ export function CloudBatchOrganizePanel({
             />
           </div>
 
-          {/* 已有分类列表：点击加入/移出输入框 */}
-          {categories.length > 0 ? (
+          {/* 已有标签列表：点击加入/移出输入框 */}
+          {tags.length > 0 ? (
             <div className="custom-scrollbar max-h-36 space-y-0.5 overflow-y-auto">
-              {categories.map((category) => {
-                const active = pendingCategories.includes(category);
+              {tags.map((tag) => {
+                const active = pendingTags.includes(tag);
                 return (
                   <button
-                    key={category}
+                    key={tag}
                     type="button"
                     disabled={busy}
                     onClick={() =>
                       active
-                        ? removePendingCategory(category)
-                        : addPendingCategory(category)
+                        ? removePendingTag(tag)
+                        : addPendingTag(tag)
                     }
                     title={
                       active
                         ? zh
-                          ? `从输入框移除：${category}`
-                          : `Remove from input: ${category}`
+                          ? `从输入框移除：${tag}`
+                          : `Remove from input: ${tag}`
                         : zh
-                          ? `加入输入框：${category}`
-                          : `Add to input: ${category}`
+                          ? `加入输入框：${tag}`
+                          : `Add to input: ${tag}`
                     }
                     className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors hover:bg-secondary disabled:opacity-50"
                   >
@@ -243,7 +243,7 @@ export function CloudBatchOrganizePanel({
                       className="min-w-0 flex-1 truncate"
                       style={{ color: "var(--foreground)" }}
                     >
-                      {category}
+                      {tag}
                     </span>
                     <Check
                       size={12}
@@ -261,16 +261,16 @@ export function CloudBatchOrganizePanel({
               className="text-[10px] italic"
               style={{ color: "var(--muted-foreground)" }}
             >
-              {zh ? "暂无已有分类，可直接输入新分类" : "No categories yet, type new ones"}
+              {zh ? "暂无已有标签，可直接输入新标签" : "No tags yet, type new ones"}
             </p>
           )}
 
-          {/* 应用：把输入框内的分类整体替换到全部选中照片 */}
+          {/* 应用：把输入框内的标签整体替换到全部选中照片 */}
           <div className="flex items-center gap-2">
             <button
               type="button"
-              disabled={busy || pendingCategories.length === 0}
-              onClick={() => onSetCategory(pendingCategories.join(","))}
+              disabled={busy || pendingTags.length === 0}
+              onClick={() => onSetTag(pendingTags.join(","))}
               className="flex h-7 flex-1 items-center justify-center gap-1 rounded-md px-2 text-[11px] font-semibold transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
               style={{
                 backgroundColor: "var(--primary)",
@@ -279,17 +279,17 @@ export function CloudBatchOrganizePanel({
             >
               <Check size={11} />
               {zh
-                ? `应用${pendingCategories.length > 0 ? `（${pendingCategories.length}）` : ""}`
-                : `Apply${pendingCategories.length > 0 ? ` (${pendingCategories.length})` : ""}`}
+                ? `应用${pendingTags.length > 0 ? `（${pendingTags.length}）` : ""}`
+                : `Apply${pendingTags.length > 0 ? ` (${pendingTags.length})` : ""}`}
             </button>
             <button
               type="button"
               disabled={busy}
               onClick={() => {
-                setPendingCategories([]);
-                onSetCategory("");
+                setPendingTags([]);
+                onSetTag("");
               }}
-              title={zh ? "清除所选照片的全部分类" : "Clear all categories"}
+              title={zh ? "清除所选照片的全部标签" : "Clear all tags"}
               className="flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 text-[11px] font-medium transition-colors hover:bg-secondary disabled:opacity-40"
               style={{ borderColor: "var(--border)", color: "var(--muted-foreground)" }}
             >
@@ -302,12 +302,12 @@ export function CloudBatchOrganizePanel({
             style={{ color: "var(--muted-foreground)" }}
           >
             {zh
-              ? pendingCategories.length > 0
-                ? `应用后将所选照片的分类替换为以上 ${pendingCategories.length} 项`
-                : "点击或输入分类加入输入框，再点「应用」生效"
-              : pendingCategories.length > 0
-                ? `Applying replaces the categories of selected photos with the ${pendingCategories.length} above`
-                : "Pick or type categories, then press Apply"}
+              ? pendingTags.length > 0
+                ? `应用后将所选照片的标签替换为以上 ${pendingTags.length} 项`
+                : "点击或输入标签加入输入框，再点「应用」生效"
+              : pendingTags.length > 0
+                ? `Applying replaces the tags of selected photos with the ${pendingTags.length} above`
+                : "Pick or type tags, then press Apply"}
           </p>
         </div>
       </Section>

@@ -61,7 +61,7 @@ const DEFAULT_UPLOAD_SETTINGS: UploadSettings = {
   compressionFormat: 'avif',
   showFlag: true,
   storageProvider: 'local',
-  categories: [],
+  tags: [],
   albumIds: [],
   stripGps: false,
 }
@@ -72,7 +72,7 @@ const DEFAULT_PASTE_UPLOAD_SETTINGS: UploadSettings = {
   compressionFormat: 'avif',
   showFlag: true,
   storageProvider: 'local',
-  categories: [],
+  tags: [],
   albumIds: [],
   stripGps: false,
 }
@@ -80,7 +80,7 @@ const DEFAULT_PASTE_UPLOAD_SETTINGS: UploadSettings = {
 export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt', editFromDraft, onDraftConsumed, onEditorClosed, refreshKey, createRequestKey = 0, newStoryPhotoIds, listPaneCollapsed = false, onToggleListPane, subTabNav, hideListPane = false, active = true, isImmersiveMode, setIsImmersiveMode }: StoriesTabProps) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { settings, categories } = useAdmin()
+  const { settings, tags } = useAdmin()
   const language = usePreferences((state) => state.language)
 
   // 沉浸全屏/Esc 放在稳定的页签层持有：切换文章时编辑器不再重挂载
@@ -898,7 +898,7 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
           onImportLocalAssets={(assets) => void handleImportLocalMaterials(assets)}
         />
       )}
-      <ImageUploadSettingsModal isOpen={showUploadSettings} onClose={() => setShowUploadSettings(false)} onConfirm={handleConfirmUpload} pendingCount={pendingImages.filter((image) => image.status === 'pending' || image.status === 'failed').length} t={t} token={token} initialSettings={uploadSettings} settings={settings} categories={categories} currentStoryId={currentStory?.id} />
+      <ImageUploadSettingsModal isOpen={showUploadSettings} onClose={() => setShowUploadSettings(false)} onConfirm={handleConfirmUpload} pendingCount={pendingImages.filter((image) => image.status === 'pending' || image.status === 'failed').length} t={t} token={token} initialSettings={uploadSettings} settings={settings} tags={tags} currentStoryId={currentStory?.id} />
       <ImageUploadSettingsModal
         isOpen={showPasteUploadSettings}
         onClose={() => {
@@ -911,7 +911,7 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
         token={token}
         initialSettings={pasteUploadSettings}
         settings={settings}
-        categories={categories}
+        tags={tags}
         confirmLabel={t('admin.save_and_process_pasted_images')}
         currentStoryId={currentStory?.id}
       />

@@ -11,7 +11,7 @@ export function getPhotoFileFormat(photo: Pick<Photo, "path" | "url">) {
 
 export interface AlbumPhotoFilters {
   search: string;
-  category: string;
+  tag: string;
   photoType: string | null;
   fileFormats: string[];
   featured: boolean | null;
@@ -26,11 +26,11 @@ export function filterAndSortAlbumPhotos(
   filters: AlbumPhotoFilters,
 ) {
   const search = filters.search.trim().toLocaleLowerCase();
-  const category = filters.category === "全部" ? "" : filters.category;
+  const tag = filters.tag === "全部" ? "" : filters.tag;
 
   return photos
     .filter(
-      (photo) => !category || photo.category?.split(",").includes(category),
+      (photo) => !tag || photo.tags?.split(",").includes(tag),
     )
     .filter(
       (photo) => !search || photo.title?.toLocaleLowerCase().includes(search),

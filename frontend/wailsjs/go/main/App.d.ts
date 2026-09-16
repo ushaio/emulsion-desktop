@@ -179,7 +179,7 @@ export function GetBlogs():Promise<Array<services.BlogDTO>>;
 
 export function GetCameras():Promise<Array<services.CameraDTO>>;
 
-export function GetCategories():Promise<Array<string>>;
+export function GetTags():Promise<Array<string>>;
 
 export function GetComments(arg1:services.ListCommentsParams):Promise<services.PaginatedResponse_mo_gallery_desktop_services_CommentDTO_>;
 

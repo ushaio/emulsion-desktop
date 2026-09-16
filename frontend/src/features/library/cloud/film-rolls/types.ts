@@ -9,7 +9,7 @@ export interface PhotoDTO {
   title: string
   url: string
   thumbnailUrl?: string
-  category?: string
+  tags?: string
   photoType?: 'digital' | 'film'
   filmRollId?: string | null
 }

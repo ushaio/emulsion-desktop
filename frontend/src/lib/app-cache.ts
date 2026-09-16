@@ -28,7 +28,7 @@ export type DesktopCacheDomain =
   | 'equipment'
   | 'photos'
   | 'albums'
-  | 'categories'
+  | 'tags'
   | 'film-rolls'
   | 'stories'
   | 'friends'
@@ -166,7 +166,7 @@ export function invalidateDesktopCacheForMutation(methodName: string) {
   if (!/^(Create|Update|Delete|Toggle|Batch|Add|Remove|Set|Reorder|Upload)/.test(methodName)) return
 
   if (/Photo|Upload/.test(methodName)) {
-    invalidateDesktopCache(['overview', 'equipment', 'photos', 'albums', 'categories', 'film-rolls', 'stories'])
+    invalidateDesktopCache(['overview', 'equipment', 'photos', 'albums', 'tags', 'film-rolls', 'stories'])
     return
   }
   if (/Album/.test(methodName)) {
@@ -203,7 +203,7 @@ export function invalidateDesktopCacheForApiRequest(path: string, method = 'GET'
   if (normalizedMethod === 'GET' || normalizedMethod === 'HEAD' || normalizedMethod === 'OPTIONS') return
 
   if (/\/photos(?:\/|$)|\/upload(?:\/|$)/.test(path)) {
-    invalidateDesktopCache(['overview', 'equipment', 'photos', 'albums', 'categories', 'film-rolls', 'stories'])
+    invalidateDesktopCache(['overview', 'equipment', 'photos', 'albums', 'tags', 'film-rolls', 'stories'])
     return
   }
   if (/\/albums(?:\/|$)/.test(path)) {
@@ -274,7 +274,7 @@ export function clearDesktopRuntimeCache() {
   equipmentCachedAt.camera = 0
   equipmentCachedAt.lens = 0
   clearCloudLibraryPageCache()
-  bumpDataRevision('overview', 'equipment', 'albums', 'categories', 'film-rolls', 'stories', 'friends', 'storage-sources', 'settings')
+  bumpDataRevision('overview', 'equipment', 'albums', 'tags', 'film-rolls', 'stories', 'friends', 'storage-sources', 'settings')
 }
 
 function estimateBytes(value: unknown) {

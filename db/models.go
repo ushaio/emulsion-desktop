@@ -88,7 +88,7 @@ type Photo struct {
 	// 关联
 	Camera     *Camera    `gorm:"foreignKey:CameraID" json:"camera,omitempty"`
 	Lens       *Lens      `gorm:"foreignKey:LensID" json:"lens,omitempty"`
-	Categories []Category `gorm:"many2many:PhotoCategories" json:"categories,omitempty"`
+	Tags       []Tag      `gorm:"many2many:PhotoTags" json:"tags,omitempty"`
 	Albums     []Album    `gorm:"many2many:AlbumPhotos" json:"albums,omitempty"`
 	Stories    []Story    `gorm:"many2many:PhotoStories" json:"stories,omitempty"`
 	FilmPhoto  *FilmPhoto `json:"filmPhoto,omitempty"`
@@ -149,15 +149,15 @@ type Album struct {
 
 func (Album) TableName() string { return "Album" }
 
-// ─── Category ────────────────────────────────────────
+// ─── Tag ─────────────────────────────────────────────
 
-type Category struct {
+type Tag struct {
 	ID     string  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	Name   string  `gorm:"type:text;uniqueIndex" json:"name"`
-	Photos []Photo `gorm:"many2many:PhotoCategories" json:"photos,omitempty"`
+	Photos []Photo `gorm:"many2many:PhotoTags" json:"photos,omitempty"`
 }
 
-func (Category) TableName() string { return "Category" }
+func (Tag) TableName() string { return "Tag" }
 
 // ─── Setting ─────────────────────────────────────────
 

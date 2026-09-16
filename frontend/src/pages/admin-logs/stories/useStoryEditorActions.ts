@@ -381,7 +381,7 @@ export function useStoryEditorActions({
 
   const handleConfirmPasteUpload = useCallback(async (settings: UploadSettings) => {
     if (!editorReady) return
-    persistPasteUploadSettings({ ...settings, category: settings.category?.trim() || '' })
+    persistPasteUploadSettings({ ...settings, tags: settings.tags ?? [] })
 
     const files = pendingPasteFilesRef.current
     if (!files?.length) {

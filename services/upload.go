@@ -130,7 +130,7 @@ type DuplicateCheckResult struct {
 type UploadSettings struct {
 	TaskID            string   `json:"taskId,omitempty"`
 	Title             string   `json:"title"`
-	Categories        []string `json:"categories"`
+	Tags              []string `json:"tags"`
 	StorageRuntime    string   `json:"storageRuntime"`
 	StoragePluginID   string   `json:"storagePluginId"`
 	StorageSourceID   string   `json:"storageSourceId"`
@@ -470,8 +470,8 @@ func (s *UploadService) UploadFile(filePath string, settings UploadSettings, has
 		"origin_flag": originFlag,
 	}
 
-	if len(settings.Categories) > 0 {
-		fields["category"] = strings.Join(settings.Categories, ",")
+	if len(settings.Tags) > 0 {
+		fields["tags"] = strings.Join(settings.Tags, ",")
 	}
 	if settings.StorageSourceID != "" {
 		fields["storage_source_id"] = settings.StorageSourceID
@@ -728,7 +728,7 @@ func (s *UploadService) uploadWithStoragePlugin(sourcePath, uploadPath string, s
 		"fileHash":            hash,
 		"showFlag":            settings.ShowFlag,
 		"originFlag":          originFlag,
-		"category":            strings.Join(settings.Categories, ","),
+		"tags":                strings.Join(settings.Tags, ","),
 		"filmRollId":          nullableString(settings.FilmRollID),
 		"exif":                registerExif,
 	}

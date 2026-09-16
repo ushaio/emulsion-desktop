@@ -15,7 +15,7 @@ import {
   Plus,
   RefreshCw,
   Star,
-  Tag,
+  Tags,
   Trash2,
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
@@ -37,7 +37,7 @@ import {
 import { resolveAssetUrl } from "@/lib/api";
 import { useCachedPageEffect } from "@/hooks/useCachedPageEffect";
 import { useDataRevision } from "@/hooks/useDataRevision";
-import { normalizePhotoCategories } from "@/lib/photoCategories";
+import { normalizePhotoTags } from "@/lib/photoTags";
 import { invalidateDesktopCache } from "@/lib/app-cache";
 import { loadPersistentResource } from "@/lib/persistent-cache";
 import {
@@ -54,7 +54,7 @@ type AlbumDetailTab = "overview" | "photos";
 
 interface AlbumAppAPI {
   GetAlbums(): Promise<Album[]>;
-  GetCategories(): Promise<string[]>;
+  GetTags(): Promise<string[]>;
   UpdateAlbum(id: string, params: { isPublished?: boolean }): Promise<Album>;
   DeleteAlbum(id: string): Promise<void>;
 }
@@ -86,18 +86,18 @@ export function CloudLibrary({
   const sections = useLibrarySections((state) => state.sections);
   const toggleSection = useLibrarySections((state) => state.toggleSection);
   const albumId = usePhotoFilters((state) => state.albumId);
-  const category = usePhotoFilters((state) => state.category);
+  const tag = usePhotoFilters((state) => state.tag);
   const photoType = usePhotoFilters((state) => state.photoType);
   const setFileFormats = usePhotoFilters((state) => state.setFileFormats);
   const featured = usePhotoFilters((state) => state.featured);
   const setAlbumId = usePhotoFilters((state) => state.setAlbumId);
-  const setCategory = usePhotoFilters((state) => state.setCategory);
+  const setTag = usePhotoFilters((state) => state.setTag);
   const setPhotoType = usePhotoFilters((state) => state.setPhotoType);
   const setFeatured = usePhotoFilters((state) => state.setFeatured);
   const [searchParams, setSearchParams] = useSearchParams();
   const [albums, setAlbums] = useState<Album[]>([]);
-  const albumsRevision = useDataRevision("albums", "categories");
-  const [categories, setCategories] = useState<string[]>([]);
+  const albumsRevision = useDataRevision("albums", "tags");
+  const [tags, setTags] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [albumsLoaded, setAlbumsLoaded] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Album | null>(null);
@@ -141,20 +141,20 @@ export function CloudLibrary({
       const requestId = ++albumsRequestIdRef.current;
       setLoading(true);
       try {
-        const [result, categoryResult] = await Promise.all([
+        const [result, tagResult] = await Promise.all([
           loadPersistentResource("albums", () => appApi().GetAlbums(), {
             force,
           }),
           loadPersistentResource(
-            "categories",
+            "tags",
             async () =>
-              normalizePhotoCategories(await appApi().GetCategories()),
+              normalizePhotoTags(await appApi().GetTags()),
             { force },
           ),
         ]);
         if (requestId !== albumsRequestIdRef.current) return;
         setAlbums(result ?? []);
-        setCategories(categoryResult);
+        setTags(tagResult);
         setAlbumsLoaded(true);
       } catch (error) {
         if (requestId !== albumsRequestIdRef.current) return;
@@ -192,14 +192,14 @@ export function CloudLibrary({
 
   const showAllPhotos = useCallback(() => {
     setAlbumId(null);
-    setCategory("全部");
+    setTag("全部");
     setPhotoType(null);
     setFileFormats([]);
     setFeatured(null);
     setSearchParams({ source: "cloud" }, { replace: true });
   }, [
     setAlbumId,
-    setCategory,
+    setTag,
     setFeatured,
     setFileFormats,
     setPhotoType,
@@ -208,14 +208,14 @@ export function CloudLibrary({
 
   const showFeaturedPhotos = useCallback(() => {
     setAlbumId(null);
-    setCategory("全部");
+    setTag("全部");
     setPhotoType(null);
     setFileFormats([]);
     setFeatured(true);
     setSearchParams({ source: "cloud" }, { replace: true });
   }, [
     setAlbumId,
-    setCategory,
+    setTag,
     setFeatured,
     setFileFormats,
     setPhotoType,
@@ -224,14 +224,14 @@ export function CloudLibrary({
 
   const showFilmRolls = useCallback(() => {
     setAlbumId(null);
-    setCategory("全部");
+    setTag("全部");
     setPhotoType(null);
     setFileFormats([]);
     setFeatured(null);
     setSearchParams({ source: "cloud", view: "film-rolls" }, { replace: true });
   }, [
     setAlbumId,
-    setCategory,
+    setTag,
     setFeatured,
     setFileFormats,
     setPhotoType,
@@ -241,7 +241,7 @@ export function CloudLibrary({
   const showPhotoType = useCallback(
     (nextPhotoType: "digital" | "film") => {
       setAlbumId(null);
-      setCategory("全部");
+      setTag("全部");
       setPhotoType(nextPhotoType);
       setFileFormats([]);
       setFeatured(null);
@@ -249,7 +249,7 @@ export function CloudLibrary({
     },
     [
       setAlbumId,
-      setCategory,
+      setTag,
       setFeatured,
       setFileFormats,
       setPhotoType,
@@ -257,10 +257,10 @@ export function CloudLibrary({
     ],
   );
 
-  const showCategory = useCallback(
-    (nextCategory: string) => {
+  const showTag = useCallback(
+    (nextTag: string) => {
       setAlbumId(null);
-      setCategory(nextCategory);
+      setTag(nextTag);
       setPhotoType(null);
       setFileFormats([]);
       setFeatured(null);
@@ -268,7 +268,7 @@ export function CloudLibrary({
     },
     [
       setAlbumId,
-      setCategory,
+      setTag,
       setFeatured,
       setFileFormats,
       setPhotoType,
@@ -278,7 +278,7 @@ export function CloudLibrary({
 
   const showAlbum = useCallback(
     (id: string) => {
-      setCategory("全部");
+      setTag("全部");
       setPhotoType(null);
       setFileFormats([]);
       setFeatured(null);
@@ -287,7 +287,7 @@ export function CloudLibrary({
     },
     [
       setAlbumId,
-      setCategory,
+      setTag,
       setFeatured,
       setFileFormats,
       setPhotoType,
@@ -297,14 +297,14 @@ export function CloudLibrary({
 
   const showAlbumBrowser = useCallback(() => {
     setAlbumId(null);
-    setCategory("全部");
+    setTag("全部");
     setPhotoType(null);
     setFileFormats([]);
     setFeatured(null);
     setSearchParams({ source: "cloud", view: "albums" }, { replace: true });
   }, [
     setAlbumId,
-    setCategory,
+    setTag,
     setFeatured,
     setFileFormats,
     setPhotoType,
@@ -313,7 +313,7 @@ export function CloudLibrary({
 
   const createAlbum = useCallback(() => {
     setAlbumId(null);
-    setCategory("全部");
+    setTag("全部");
     setPhotoType(null);
     setFileFormats([]);
     setFeatured(null);
@@ -323,7 +323,7 @@ export function CloudLibrary({
     );
   }, [
     setAlbumId,
-    setCategory,
+    setTag,
     setFeatured,
     setFileFormats,
     setPhotoType,
@@ -333,7 +333,7 @@ export function CloudLibrary({
   const manageAlbum = useCallback(
     (id: string, tab: AlbumDetailTab) => {
       setAlbumId(null);
-      setCategory("全部");
+      setTag("全部");
       setPhotoType(null);
       setFileFormats([]);
       setFeatured(null);
@@ -344,7 +344,7 @@ export function CloudLibrary({
     },
     [
       setAlbumId,
-      setCategory,
+      setTag,
       setFeatured,
       setFileFormats,
       setPhotoType,
@@ -428,7 +428,7 @@ export function CloudLibrary({
               view === "photos" &&
               !albumId &&
               featured !== true &&
-              category === "全部" &&
+              tag === "全部" &&
               !photoType
             }
             icon={Images}
@@ -462,7 +462,7 @@ export function CloudLibrary({
                   view === "photos" &&
                   !albumId &&
                   featured !== true &&
-                  category === "全部" &&
+                  tag === "全部" &&
                   photoType === "digital"
                 }
                 icon={Camera}
@@ -474,7 +474,7 @@ export function CloudLibrary({
                   view === "photos" &&
                   !albumId &&
                   featured !== true &&
-                  category === "全部" &&
+                  tag === "全部" &&
                   photoType === "film"
                 }
                 icon={Film}
@@ -485,16 +485,16 @@ export function CloudLibrary({
           )}
 
           <LibrarySidebarSection
-            open={sections.cloudCategories}
-            onToggle={() => toggleSection("cloudCategories")}
-            label={t("ui.category_filter", language)}
+            open={sections.cloudTags}
+            onToggle={() => toggleSection("cloudTags")}
+            label={language === "zh" ? "标签" : "Tags"}
             onRefresh={() => void fetchAlbums(true)}
             refreshing={loading}
             refreshLabel={t("common.refresh", language)}
           />
-          {sections.cloudCategories && (
+          {sections.cloudTags && (
             <div className="space-y-0.5">
-              {categories.map((item) => (
+              {tags.map((item) => (
                 <LibraryNavItem
                   key={item}
                   active={
@@ -502,19 +502,19 @@ export function CloudLibrary({
                     !albumId &&
                     featured !== true &&
                     !photoType &&
-                    category === item
+                    tag === item
                   }
-                  icon={Tag}
+                  icon={Tags}
                   label={item}
-                  onClick={() => showCategory(item)}
+                  onClick={() => showTag(item)}
                 />
               ))}
-              {!loading && categories.length === 0 && (
+              {!loading && tags.length === 0 && (
                 <p
                   className="px-2.5 py-2 text-[10px]"
                   style={{ color: "var(--muted-foreground)" }}
                 >
-                  {language === "zh" ? "暂无分类" : "No categories"}
+                  {language === "zh" ? "暂无标签" : "No tags"}
                 </p>
               )}
             </div>

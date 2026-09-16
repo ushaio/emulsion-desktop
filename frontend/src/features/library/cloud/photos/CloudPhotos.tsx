@@ -15,7 +15,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { usePreferences, usePhotoFilters } from "@/store/preferences";
 import { t } from "@/lib/i18n";
 import { resolveAssetUrl, type PhotoDto } from "@/lib/api";
-import { normalizePhotoCategories } from "@/lib/photoCategories";
+import { normalizePhotoTags } from "@/lib/photoTags";
 import { loadPersistentResource } from "@/lib/persistent-cache";
 import {
   type DesktopCacheDomain,
@@ -33,7 +33,7 @@ import {
   CheckCloudDownloadConflictByFileName,
   DeletePhoto,
   GetAlbum,
-  GetCategories,
+  GetTags,
   GetDesktopStorageSources,
   GetPhotos,
   ToggleFeatured,
@@ -146,7 +146,7 @@ export function CloudPhotos({
   const navigate = useNavigate();
 
   const filterKey = JSON.stringify([
-    filters.category,
+    filters.tag,
     filters.search,
     filters.photoType,
     filters.fileFormats,
@@ -190,7 +190,7 @@ export function CloudPhotos({
     () => new Set(existingPhotoIds),
     [existingPhotoIds],
   );
-  const [categories, setCategories] = useState<string[]>([]);
+  const [tags, setTags] = useState<string[]>([]);
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<Photo | null>(null);
   const [batchDeleting, setBatchDeleting] = useState(false);
@@ -382,7 +382,7 @@ export function CloudPhotos({
         }
 
         const result = (await GetPhotos({
-          category: filters.category === "全部" ? "" : filters.category,
+          tag: filters.tag === "全部" ? "" : filters.tag,
           search: filters.search,
           photoType: filters.photoType ?? undefined,
           formats: filters.fileFormats,
@@ -463,16 +463,16 @@ export function CloudPhotos({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterKey]);
 
-  // 加载分类
+  // 加载标签
   useCachedPageEffect(() => {
     (async () => {
       try {
-        const result = await loadPersistentResource("categories", async () =>
-          normalizePhotoCategories(await GetCategories()),
+        const result = await loadPersistentResource("tags", async () =>
+          normalizePhotoTags(await GetTags()),
         );
-        setCategories(result);
+        setTags(result);
       } catch (error) {
-        console.warn("加载照片分类失败:", error);
+        console.warn("加载照片标签失败:", error);
       }
     })();
   }, []);
@@ -633,12 +633,12 @@ export function CloudPhotos({
           ? ({ ...prev, ...updated } as Photo)
           : prev,
       );
-      // 详情栏新输入的分类并入本页筛选下拉
-      if (updated.category) {
-        setCategories((prev) =>
-          normalizePhotoCategories([
+      // 详情栏新输入的标签并入本页筛选下拉
+      if (updated.tags) {
+        setTags((prev) =>
+          normalizePhotoTags([
             ...prev,
-            ...updated.category
+            ...updated.tags
               .split(",")
               .map((name) => name.trim())
               .filter(Boolean),
@@ -855,13 +855,13 @@ export function CloudPhotos({
     }
   };
 
-  // 批量整理面板：设置分类 / 加入精选。服务端暂无对应批量端点，
+  // 批量整理面板：设置标签 / 加入精选。服务端暂无对应批量端点，
   // 按小块并发调用单张更新接口（PATCH /admin/photos/:id），统计失败数。
   const handleBatchUpdatePhotoFields = async (
-    params: { category?: string; isFeatured?: boolean },
+    params: { tags?: string; isFeatured?: boolean },
     patch: Partial<Photo>,
     successLabel: string,
-    options?: { mergeCategories?: string[]; refresh?: boolean },
+    options?: { mergeTags?: string[]; refresh?: boolean },
   ) => {
     if (selected.size === 0 || batchUpdating) return;
     const ids = Array.from(selected);
@@ -883,9 +883,9 @@ export function CloudPhotos({
     }
     if (failed === 0) {
       const domains: DesktopCacheDomain[] = ["overview", "photos"];
-      if (options?.mergeCategories?.length) domains.push("categories");
+      if (options?.mergeTags?.length) domains.push("tags");
       if (options?.refresh) {
-        // 筛选视图（精选/分类）下照片可能不再匹配当前筛选，以服务端为准重新拉取
+        // 筛选视图（精选/标签）下照片可能不再匹配当前筛选，以服务端为准重新拉取
         invalidateAfterLocalMutation(domains);
         pageRef.current = 1;
         await fetchPhotos(1, false);
@@ -895,10 +895,10 @@ export function CloudPhotos({
         );
         invalidateAfterLocalMutation(domains);
       }
-      if (options?.mergeCategories?.length) {
-        // 新分类并入本页筛选下拉（categories 持久缓存已在上面失效）
-        setCategories((prev) =>
-          normalizePhotoCategories([...prev, ...options.mergeCategories!]),
+      if (options?.mergeTags?.length) {
+        // 新标签并入本页筛选下拉（tags 持久缓存已在上面失效）
+        setTags((prev) =>
+          normalizePhotoTags([...prev, ...options.mergeTags!]),
         );
       }
       toast.success(
@@ -922,20 +922,20 @@ export function CloudPhotos({
     setBatchUpdating(false);
   };
 
-  const handleBatchSetCategory = (category: string) =>
+  const handleBatchSetTags = (tag: string) =>
     handleBatchUpdatePhotoFields(
-      { category },
-      { category },
-      language === "zh" ? "已设置分类：" : "Category set for",
+      { tags: tag },
+      { tags: tag },
+      language === "zh" ? "已设置标签：" : "Tags set for",
       {
-        // 新分类需并入筛选下拉；分类筛选激活时照片可能不再匹配，需刷新列表
-        mergeCategories: category
-          ? category
+        // 新标签需并入筛选下拉；标签筛选激活时照片可能不再匹配，需刷新列表
+        mergeTags: tag
+          ? tag
               .split(",")
               .map((name) => name.trim())
               .filter(Boolean)
           : [],
-        refresh: filters.category !== "全部",
+        refresh: filters.tag !== "全部",
       },
     );
 
@@ -1314,13 +1314,13 @@ export function CloudPhotos({
       ? language === "zh"
         ? "相册照片"
         : "Album photos"
-      : filters.category === "全部"
+      : filters.tag === "全部"
         ? filters.photoType === "digital"
           ? t("admin.photos_type_digital", language)
           : filters.photoType === "film"
             ? t("admin.photos_type_film", language)
             : t("admin.resource_library_all_photos", language)
-        : filters.category;
+        : filters.tag;
 
   return (
     <>
@@ -1339,11 +1339,11 @@ export function CloudPhotos({
             />
             <CloudPhotoFilters
               language={language}
-              categories={categories}
-              category={filters.category}
+              tags={tags}
+              tag={filters.tag}
               photoType={filters.photoType}
               fileFormats={filters.fileFormats}
-              onCategoryChange={filters.setCategory}
+              onTagChange={filters.setTag}
               onPhotoTypeChange={filters.setPhotoType}
               onFileFormatsChange={filters.setFileFormats}
             />
@@ -1620,11 +1620,11 @@ export function CloudPhotos({
             {selected.size > 0 && batchOrganizeOpen && !selectionMode && (
               <CloudBatchOrganizePanel
                 selectedCount={selected.size}
-                categories={categories}
+                tags={tags}
                 language={language}
                 busy={batchUpdating}
                 onClose={() => setBatchOrganizeOpen(false)}
-                onSetCategory={(category) => void handleBatchSetCategory(category)}
+                onSetTag={(tag) => void handleBatchSetTags(tag)}
                 onSetShowFlag={(show) => void handleBatchShowFlag(show)}
                 onSetFeatured={(featured) => void handleBatchSetFeatured(featured)}
               />
@@ -1662,7 +1662,7 @@ export function CloudPhotos({
 
         <PhotoInfoSidebar
           photo={sidebarPhoto}
-          categories={categories}
+          tags={tags}
           token={token}
           t={tForPanel}
           notify={notifyForPanel}

@@ -295,7 +295,7 @@ export function CloudAlbums({
     return photos.filter(photo => {
       if (currentPhotoIds.has(photo.id)) return false
       if (!query) return true
-      return [photo.title, photo.category].some(value => value?.toLowerCase().includes(query))
+      return [photo.title, photo.tags].some(value => value?.toLowerCase().includes(query))
     })
   }, [currentAlbum?.photos, photoSelectorSearch, photos])
 

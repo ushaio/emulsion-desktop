@@ -53,7 +53,7 @@ export async function uploadStoryPhotoFile({
     token,
     file: fileToUpload,
     title: file.name.replace(/\.[^/.]+$/, ''),
-    category: settings.categories?.length ? settings.categories : settings.category,
+    tags: settings.tags?.length ? settings.tags : [],
     origin_flag: 'desktop',
     storage_provider: settings.storageProvider,
     storage_source_id: settings.storageSourceId,

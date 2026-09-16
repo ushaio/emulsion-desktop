@@ -2118,7 +2118,7 @@ export namespace services {
 	    orientation?: number;
 	    software?: string;
 	    gps?: string;
-	    category: string;
+	    tags: string;
 	    photoType: string;
 	    filmRollId?: string;
 	    filmRollName?: string;
@@ -2166,7 +2166,7 @@ export namespace services {
 	        this.orientation = source["orientation"];
 	        this.software = source["software"];
 	        this.gps = source["gps"];
-	        this.category = source["category"];
+	        this.tags = source["tags"];
 	        this.photoType = source["photoType"];
 	        this.filmRollId = source["filmRollId"];
 	        this.filmRollName = source["filmRollName"];
@@ -3166,7 +3166,7 @@ export namespace services {
 	    }
 	}
 	export class ListPhotosParams {
-	    category: string;
+	    tag: string;
 	    albumId: string;
 	    cameraId: string;
 	    lensId: string;
@@ -3188,7 +3188,7 @@ export namespace services {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.category = source["category"];
+	        this.tag = source["tag"];
 	        this.albumId = source["albumId"];
 	        this.cameraId = source["cameraId"];
 	        this.lensId = source["lensId"];
@@ -3736,7 +3736,7 @@ export namespace services {
 	    commentCount: number;
 	    cameraCount: number;
 	    lensCount: number;
-	    categoryCount: number;
+	    tagCount: number;
 	    featuredCount: number;
 	    hiddenCount: number;
 	    pendingComments: number;
@@ -3776,7 +3776,7 @@ export namespace services {
 	        this.commentCount = source["commentCount"];
 	        this.cameraCount = source["cameraCount"];
 	        this.lensCount = source["lensCount"];
-	        this.categoryCount = source["categoryCount"];
+	        this.tagCount = source["tagCount"];
 	        this.featuredCount = source["featuredCount"];
 	        this.hiddenCount = source["hiddenCount"];
 	        this.pendingComments = source["pendingComments"];
@@ -4407,7 +4407,7 @@ export namespace services {
 	    showFlag?: boolean;
 	    // Go type: time
 	    takenAt?: any;
-	    category?: string;
+	    tags?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new UpdatePhotoParams(source);
@@ -4419,7 +4419,7 @@ export namespace services {
 	        this.isFeatured = source["isFeatured"];
 	        this.showFlag = source["showFlag"];
 	        this.takenAt = this.convertValues(source["takenAt"], null);
-	        this.category = source["category"];
+	        this.tags = source["tags"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -4530,7 +4530,7 @@ export namespace services {
 	export class UploadSettings {
 	    taskId?: string;
 	    title: string;
-	    categories: string[];
+	    tags: string[];
 	    storageRuntime: string;
 	    storagePluginId: string;
 	    storageSourceId: string;
@@ -4553,7 +4553,7 @@ export namespace services {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.taskId = source["taskId"];
 	        this.title = source["title"];
-	        this.categories = source["categories"];
+	        this.tags = source["tags"];
 	        this.storageRuntime = source["storageRuntime"];
 	        this.storagePluginId = source["storagePluginId"];
 	        this.storageSourceId = source["storageSourceId"];

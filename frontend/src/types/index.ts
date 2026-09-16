@@ -63,7 +63,7 @@ export interface Photo {
   software?: string
   gps?: string
 
-  category: string
+  tags: string
   photoType: 'digital' | 'film'
   filmRollId?: string
   filmRollName?: string

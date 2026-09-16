@@ -15,7 +15,7 @@ interface Props {
 export function PhotoPreviewOverlay({ photo, t, onClose, onPrevious, onNext, hasPrevious = false, hasNext = false }: Props) {
   return <PhotoPreviewFrame
     title={photo.title || t('admin.untitled_photo')}
-    subtitle={[photo.category || '', photo.photoType === 'film' ? t('admin.upload_type_film') : t('admin.upload_type_digital'), photo.takenAt ? new Date(photo.takenAt).toLocaleDateString('zh-CN') : ''].filter(Boolean).join(' · ') || photo.id}
+    subtitle={[photo.tags || '', photo.photoType === 'film' ? t('admin.upload_type_film') : t('admin.upload_type_digital'), photo.takenAt ? new Date(photo.takenAt).toLocaleDateString('zh-CN') : ''].filter(Boolean).join(' · ') || photo.id}
     originalSrc={photoAssetSrc({ ...photo, thumbnailUrl: null, thumbPath: undefined })}
     previewSrc={photoAssetSrc(photo)}
     alt={photo.title || ''}

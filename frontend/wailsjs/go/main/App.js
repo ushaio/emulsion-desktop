@@ -342,8 +342,8 @@ export function GetCameras() {
   return window['go']['main']['App']['GetCameras']();
 }
 
-export function GetCategories() {
-  return window['go']['main']['App']['GetCategories']();
+export function GetTags() {
+  return window['go']['main']['App']['GetTags']();
 }
 
 export function GetComments(arg1) {

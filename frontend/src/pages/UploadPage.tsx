@@ -64,7 +64,7 @@ interface UploadItem {
 
 interface UploadSettings {
   title: string
-  categories: string[]
+  tags: string[]
   albumIds: string[]
   storyId: string
   filmRollId: string
@@ -83,7 +83,7 @@ type UploadType = 'digital' | 'film'
 
 const DEFAULT_UPLOAD_SETTINGS: UploadSettings = {
   title: '',
-  categories: [],
+  tags: [],
   albumIds: [],
   storyId: '',
   filmRollId: '',
@@ -103,7 +103,7 @@ interface UploadPageDraftState {
   uploadType: UploadType
   settings: UploadSettings
   selectedIds: string[]
-  categoryInput: string
+  tagInput: string
   useCustomPrefix: boolean
 }
 
@@ -112,7 +112,7 @@ let uploadPageDraftState: UploadPageDraftState = {
   uploadType: 'digital',
   settings: DEFAULT_UPLOAD_SETTINGS,
   selectedIds: [],
-  categoryInput: '',
+  tagInput: '',
   useCustomPrefix: false,
 }
 
@@ -128,7 +128,7 @@ export function UploadPage() {
     return {
       ...DEFAULT_UPLOAD_SETTINGS,
       title: '',
-      categories: [...stored.categories],
+      tags: [...stored.tags],
       albumIds: [...stored.albumIds],
       storyId: stored.storyId,
       filmRollId: stored.filmRollId,
@@ -147,7 +147,7 @@ export function UploadPage() {
   const [preparingLabel, setPreparingLabel] = useState('')
   const [isDragging, setIsDragging] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(uploadPageDraftState.selectedIds))
-  const [categoryInput, setCategoryInput] = useState(() => uploadPageDraftState.categoryInput)
+  const [tagInput, setTagInput] = useState(() => uploadPageDraftState.tagInput)
   const [previewFile, setPreviewFile] = useState<{ path: string; name: string } | null>(null)
   const [useCustomPrefix, setUseCustomPrefix] = useState(() => useUploadSettings.getState().useCustomPrefix)
   const [showPrefixDropdown, setShowPrefixDropdown] = useState(false)
@@ -160,13 +160,13 @@ export function UploadPage() {
       uploadType,
       settings,
       selectedIds: Array.from(selectedIds),
-      categoryInput,
+      tagInput,
       useCustomPrefix,
     }
     // 持久化上传参数（标题属于单次内容，不持久化）
     useUploadSettings.getState().setUploadSettings({
       uploadType,
-      categories: settings.categories,
+      tags: settings.tags,
       albumIds: settings.albumIds,
       storyId: settings.storyId,
       filmRollId: settings.filmRollId,
@@ -179,7 +179,7 @@ export function UploadPage() {
       stripGPS: settings.stripGPS,
       useCustomPrefix,
     })
-  }, [items, uploadType, settings, selectedIds, categoryInput, useCustomPrefix])
+  }, [items, uploadType, settings, selectedIds, tagInput, useCustomPrefix])
 
   // Wails 原生文件拖放（可获取完整路径）
   useEffect(() => {
@@ -426,7 +426,7 @@ export function UploadPage() {
       })),
       {
         title: settings.title,
-        categories: settings.categories,
+        tags: settings.tags,
         albumIds: settings.albumIds.length > 0 ? settings.albumIds : undefined,
         storyId: settings.storyId || undefined,
         filmRollId: uploadType === 'film' ? (settings.filmRollId || undefined) : undefined,
@@ -531,41 +531,41 @@ export function UploadPage() {
                     style={{ borderColor: 'var(--border)', backgroundColor: 'var(--background)', color: 'var(--foreground)' }} />
                 </div>
 
-                {/* 分类 + 相册 */}
+                {/* 标签 + 相册 */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted-foreground)' }}>分类</label>
+                    <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--muted-foreground)' }}>标签</label>
                     <div className="flex flex-wrap items-center gap-1.5 px-2.5 py-1.5 min-h-[34px] rounded-lg border cursor-text"
                       style={{ borderColor: 'var(--border)', backgroundColor: 'var(--background)' }}
                       onClick={(e) => { if (e.target === e.currentTarget || !(e.target as HTMLElement).closest('button')) (e.currentTarget.querySelector('input') as HTMLInputElement)?.focus() }}>
-                      {settings.categories.map(c => (
+                      {settings.tags.map(c => (
                         <span key={c} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-md"
                           style={{ backgroundColor: 'var(--muted)', color: 'var(--foreground)' }}>
                           {c}
-                          <button type="button" onClick={() => setSettings(s => ({ ...s, categories: s.categories.filter(x => x !== c) }))}
+                          <button type="button" onClick={() => setSettings(s => ({ ...s, tags: s.tags.filter(x => x !== c) }))}
                             className="hover:text-destructive transition-colors">
                             <X size={10} />
                           </button>
                         </span>
                       ))}
                       <input type="text"
-                        value={categoryInput}
-                        onChange={e => setCategoryInput(e.target.value)}
+                        value={tagInput}
+                        onChange={e => setTagInput(e.target.value)}
                         onKeyDown={e => {
-                          if (e.key === 'Enter' && categoryInput.trim()) {
+                          if (e.key === 'Enter' && tagInput.trim()) {
                             e.preventDefault()
-                            if (!settings.categories.includes(categoryInput.trim())) {
-                              setSettings(s => ({ ...s, categories: [...s.categories, categoryInput.trim()] }))
+                            if (!settings.tags.includes(tagInput.trim())) {
+                              setSettings(s => ({ ...s, tags: [...s.tags, tagInput.trim()] }))
                             }
-                            setCategoryInput('')
+                            setTagInput('')
                           }
-                          if (e.key === 'Backspace' && !categoryInput && settings.categories.length > 0) {
-                            setSettings(s => ({ ...s, categories: s.categories.slice(0, -1) }))
+                          if (e.key === 'Backspace' && !tagInput && settings.tags.length > 0) {
+                            setSettings(s => ({ ...s, tags: s.tags.slice(0, -1) }))
                           }
                         }}
                         className="flex-1 min-w-[60px] outline-none bg-transparent text-xs"
                         style={{ color: 'var(--foreground)' }}
-                        placeholder={settings.categories.length === 0 ? '输入后回车' : ''} />
+                        placeholder={settings.tags.length === 0 ? '输入后回车' : ''} />
                     </div>
                   </div>
                   <div>

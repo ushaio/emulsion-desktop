@@ -6,7 +6,7 @@ export type PersistentCacheResource =
   | 'equipment-camera'
   | 'equipment-lens'
   | 'albums'
-  | 'categories'
+  | 'tags'
   | 'film-rolls'
   | 'stories'
   | 'friends'
@@ -22,7 +22,7 @@ export const PERSISTENT_CACHE_TTL_MS: Record<PersistentCacheResource, number> = 
   'equipment-camera': 30 * 60 * 1000,
   'equipment-lens': 30 * 60 * 1000,
   albums: 10 * 60 * 1000,
-  categories: 24 * 60 * 60 * 1000,
+  tags: 24 * 60 * 60 * 1000,
   'film-rolls': 10 * 60 * 1000,
   stories: 10 * 60 * 1000,
   friends: 10 * 60 * 1000,

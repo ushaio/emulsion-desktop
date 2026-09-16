@@ -138,7 +138,7 @@ export const usePreferences = create<AdminPreferences>()(
 // 照片筛选（会话级，不持久化）
 interface PhotoFilters {
   search: string
-  category: string
+  tag: string
   photoType: string | null
   fileFormats: string[]
   channel: string | null
@@ -149,7 +149,7 @@ interface PhotoFilters {
   sortBy: 'createdAt' | 'takenAt'
   sortOrder: 'asc' | 'desc'
   setSearch: (s: string) => void
-  setCategory: (c: string) => void
+  setTag: (c: string) => void
   setPhotoType: (t: string | null) => void
   setFileFormats: (formats: string[]) => void
   setChannel: (c: string | null) => void
@@ -164,7 +164,7 @@ interface PhotoFilters {
 
 const defaultFilters = {
   search: '',
-  category: '全部',
+  tag: '全部',
   photoType: null as string | null,
   fileFormats: [] as string[],
   channel: null as string | null,
@@ -179,7 +179,7 @@ const defaultFilters = {
 export const usePhotoFilters = create<PhotoFilters>()((set) => ({
   ...defaultFilters,
   setSearch: (s) => set({ search: s }),
-  setCategory: (c) => set({ category: c }),
+  setTag: (c) => set({ tag: c }),
   setPhotoType: (t) => set({ photoType: t }),
   setFileFormats: (formats) => set({ fileFormats: formats }),
   setChannel: (c) => set({ channel: c }),
@@ -195,7 +195,7 @@ export const usePhotoFilters = create<PhotoFilters>()((set) => ({
 // 资源库左侧分区折叠状态（持久化：用户操作的展开/折叠跨页面保留，首次进入默认展开）
 export type LibrarySectionKey =
   | 'cloudPhotoType'
-  | 'cloudCategories'
+  | 'cloudTags'
   | 'cloudAlbums'
   | 'localFolders'
   | 'localCollections'
@@ -210,7 +210,7 @@ interface LibrarySectionsState {
 
 const defaultSections: Record<LibrarySectionKey, boolean> = {
   cloudPhotoType: true,
-  cloudCategories: true,
+  cloudTags: true,
   cloudAlbums: true,
   localFolders: true,
   localCollections: true,
@@ -262,7 +262,7 @@ export const useSettingsNav = create<SettingsNavState>()(
 // 上传页参数（持久化：下次进入上传页时复用上次的设置；标题属于单次内容，不持久化）
 export interface UploadPageSettings {
   uploadType: 'digital' | 'film'
-  categories: string[]
+  tags: string[]
   albumIds: string[]
   storyId: string
   filmRollId: string
@@ -282,7 +282,7 @@ interface UploadSettingsState extends UploadPageSettings {
 
 export const defaultUploadPageSettings: UploadPageSettings = {
   uploadType: 'digital',
-  categories: [],
+  tags: [],
   albumIds: [],
   storyId: '',
   filmRollId: '',
