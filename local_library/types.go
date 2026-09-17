@@ -232,6 +232,7 @@ type AssetDTO struct {
 	CloudStoragePluginID string               `json:"cloudStoragePluginId,omitempty"`
 	CloudURLType         string               `json:"cloudUrlType,omitempty"`
 	CloudRemoteUpdatedAt *time.Time           `json:"cloudRemoteUpdatedAt,omitempty"`
+	CloudLinkedAt        *time.Time           `json:"cloudLinkedAt,omitempty"`
 	CloudSyncState       string               `json:"cloudSyncState,omitempty"`
 	CloudSyncError       string               `json:"cloudSyncError,omitempty"`
 	UploadStatus         string               `json:"uploadStatus"`

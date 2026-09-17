@@ -52,7 +52,6 @@ type App struct {
 	Friend              *services.FriendService
 	Comment             *services.CommentService
 	Upload              *services.UploadService
-	Storage             *services.StorageService
 	Settings            *services.SettingsService
 	EditorAi            *services.EditorAiService
 	ModelCatalog        *services.ModelCatalogService
@@ -66,6 +65,7 @@ type App struct {
 	AgentExtensions     *agent_extensions.Manager
 	StoragePlugins      *storage_plugins.Manager
 	PluginMarketplace   *storage_plugins.Marketplace
+	StorageMaintenance  *services.StorageMaintenanceService
 	automationEnabled   bool
 	automation          *automationBridge
 }
@@ -93,6 +93,9 @@ func NewApp(cfg *config.Config, automationEnabled bool) *App {
 			runtime.EventsEmit(app.ctx, "local-library:event", event)
 		}
 	})
+	// Storage maintenance reconciles a desktop storage plugin source against the
+	// local library's cloud projection, so it needs both managers.
+	app.StorageMaintenance = services.NewStorageMaintenanceService(app.StoragePlugins, app.LocalLibrary)
 	return app
 }
 
@@ -133,7 +136,6 @@ func (a *App) startup(ctx context.Context) {
 			runtime.EventsEmit(a.ctx, "upload:progress", event)
 		}
 	})
-	a.Storage = services.NewStorageService(a.Proxy)
 	a.Settings = services.NewSettingsService(a.Proxy)
 	a.EditorAi = services.NewEditorAiService(a.cfg, a.Upload)
 	a.EditorAi.SetLogger(a.Logger)
@@ -945,12 +947,6 @@ func (a *App) UpdateSettings(data map[string]string) (map[string]string, error) 
 	}
 	result["official_site_url"] = a.cfg.Official.BaseURL
 	return result, err
-}
-func (a *App) FixMissingPhotos(photoIDs []string) (*services.FixMissingPhotosResult, error) {
-	return a.Storage.FixMissing(photoIDs)
-}
-func (a *App) GenerateThumbnail(photoID string) (*services.PhotoDTO, error) {
-	return a.Storage.GenerateThumbnail(photoID)
 }
 
 // ─── Linux DO OAuth ───────────────────────────────────

@@ -345,8 +345,10 @@ func (m *Manager) ListSources() []SourceDTO {
 	for _, source := range sources {
 		result = append(result, SourceDTO{
 			ID: source.ID, Name: source.Name, PluginID: source.PluginID,
-			PluginVersion: source.PluginVersion, Config: cloneStringMap(source.Config),
-			Enabled: source.Enabled, Status: source.Status, LastError: source.LastError,
+			PluginVersion: source.PluginVersion,
+			Vendor:        InferVendor(source.PluginID, source.Config),
+			Config:        cloneStringMap(source.Config),
+			Enabled:       source.Enabled, Status: source.Status, LastError: source.LastError,
 			CreatedAt: source.CreatedAt, UpdatedAt: source.UpdatedAt,
 		})
 	}
@@ -915,8 +917,10 @@ func (m *Manager) StopAll() {
 func sourceDTO(source Source) SourceDTO {
 	return SourceDTO{
 		ID: source.ID, Name: source.Name, PluginID: source.PluginID,
-		PluginVersion: source.PluginVersion, Config: cloneStringMap(source.Config),
-		Enabled: source.Enabled, Status: source.Status, LastError: source.LastError,
+		PluginVersion: source.PluginVersion,
+		Vendor:        InferVendor(source.PluginID, source.Config),
+		Config:        cloneStringMap(source.Config),
+		Enabled:       source.Enabled, Status: source.Status, LastError: source.LastError,
 		CreatedAt: source.CreatedAt, UpdatedAt: source.UpdatedAt,
 	}
 }

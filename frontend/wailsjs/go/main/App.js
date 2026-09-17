@@ -342,10 +342,6 @@ export function GetCameras() {
   return window['go']['main']['App']['GetCameras']();
 }
 
-export function GetTags() {
-  return window['go']['main']['App']['GetTags']();
-}
-
 export function GetComments(arg1) {
   return window['go']['main']['App']['GetComments'](arg1);
 }
@@ -516,6 +512,10 @@ export function GetStoryAiModels() {
 
 export function GetStoryAiProviderModels(arg1) {
   return window['go']['main']['App']['GetStoryAiProviderModels'](arg1);
+}
+
+export function GetTags() {
+  return window['go']['main']['App']['GetTags']();
 }
 
 export function GetZineAssetBlob(arg1) {
@@ -752,6 +752,10 @@ export function ReadAgentSkill(arg1) {
 
 export function ReadAgentSkillResource(arg1, arg2) {
   return window['go']['main']['App']['ReadAgentSkillResource'](arg1, arg2);
+}
+
+export function ReanalyzeLocalAssetColors(arg1) {
+  return window['go']['main']['App']['ReanalyzeLocalAssetColors'](arg1);
 }
 
 export function RebuildLocalLibraryThumbnails(arg1) {

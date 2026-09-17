@@ -1501,6 +1501,11 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
     }
   }, [copy.previewRetryFailed, copy.previewRetrySucceeded, refreshAssets])
 
+  /* 主色重分析已完成：刷新列表，让网格与信息面板读到新的色值。 */
+  const applyReanalyzedColors = useCallback(() => {
+    refreshAssets()
+  }, [refreshAssets])
+
   const runThumbnailRepair = useCallback(async (mode: 'missing' | 'all') => {
     setRepairBusy(true)
     try {
@@ -1921,6 +1926,7 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
           <LocalAssetDetails asset={selectedAsset} copy={copy} rootPath={snapshot.rootPath} saving={saving} maintenanceBusy={missingMaintenanceBusy || previewMaintenanceBusy} tags={tags} collections={collections} organizationBusy={organizationBusy} onSave={saveAsset}
             onPreview={(asset) => { if (asset.availability !== 'missing') setPreviewAsset(asset) }} onOpenSystem={openSystem} onMove={openMoveAsset} onDelete={setDeleteAsset} onRestore={restoreAsset}
             onPlayClip={playClipFromDetails}
+            onColorsUpdated={applyReanalyzedColors}
             onRetryPreview={retryPreview} onRecheckMissing={recheckMissing} onRemoveMissing={(asset) => setRemoveMissingAsset(asset)} onSetTags={setAssetTags} onCreateTag={createTagFromDetails} onSetCollections={setAssetCollections} onUpload={openUploadSettings} />
         </div>
       </div>

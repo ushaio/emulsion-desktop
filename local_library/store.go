@@ -70,11 +70,12 @@ type indexedFile struct {
 }
 
 type unchangedAsset struct {
-	ID                   AssetID
-	PreviewStatus        string
-	DominantColors       string
-	IsLivePhoto          bool
-	LivePhotoVideoLength sql.NullInt64
+	ID                    AssetID
+	PreviewStatus         string
+	DominantColors        string
+	DominantColorsVersion int
+	IsLivePhoto           bool
+	LivePhotoVideoLength  sql.NullInt64
 }
 
 func openStore(root string) (*store, error) {
@@ -322,7 +323,8 @@ func (s *store) migrate() error {
 		    cloud_photo_id TEXT,
 		    cloud_storage_source_id TEXT, cloud_storage_plugin_id TEXT,
 		    cloud_path TEXT, cloud_thumb_path TEXT, cloud_url_type TEXT,
-		    cloud_remote_updated_at INTEGER, cloud_sync_state TEXT, cloud_sync_error TEXT
+		    cloud_remote_updated_at INTEGER, cloud_sync_state TEXT, cloud_sync_error TEXT,
+		    cloud_linked_at INTEGER
 	        )`,
 		`CREATE TABLE IF NOT EXISTS asset_live_photos (
 			    asset_id TEXT PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE,
@@ -425,11 +427,22 @@ func (s *store) migrate() error {
 		{"cloud_remote_updated_at", "INTEGER"},
 		{"cloud_sync_state", "TEXT"},
 		{"cloud_sync_error", "TEXT"},
+		// When the asset was linked to its cloud copy. Distinct from
+		// discovered_at (index entry time) and cloud_remote_updated_at (the
+		// remote file's own mtime), so the "uploaded at" field matches what the
+		// cloud panel reports for the same photo.
+		{"cloud_linked_at", "INTEGER"},
 	}
 	for _, column := range cloudColumns {
 		if err := addColumnIfMissing(tx, "assets", column.name, column.definition); err != nil {
 			return fmt.Errorf("M010 add assets.%s: %w", column.name, err)
 		}
+	}
+	// Records which revision of extractDominantColors produced the stored
+	// palette. Existing rows default to 0, so the first scan after an algorithm
+	// change re-extracts them instead of leaving a stale colour card in place.
+	if err := addColumnIfMissing(tx, "assets", "dominant_colors_version", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return fmt.Errorf("add assets.dominant_colors_version: %w", err)
 	}
 	if err := addColumnIfMissing(tx, "assets", "local_id", "INTEGER"); err != nil {
 		return fmt.Errorf("M012 add assets.local_id: %w", err)
@@ -627,10 +640,10 @@ func (s *store) upsertAsset(ctx context.Context, file indexedFile, scanToken str
 // stamps it with the current scan token. Called once per scanned file.
 func (s *store) touchUnchangedAsset(ctx context.Context, pathKey string, byteSize, modifiedAtNS int64, scanToken string) (*unchangedAsset, error) {
 	var item unchangedAsset
-	err := s.db.QueryRowContext(ctx, `SELECT a.id,a.preview_status,a.dominant_colors,COALESCE(lp.is_live_photo,0),lp.video_length
+	err := s.db.QueryRowContext(ctx, `SELECT a.id,a.preview_status,a.dominant_colors,COALESCE(a.dominant_colors_version,0),COALESCE(lp.is_live_photo,0),lp.video_length
 		FROM assets a LEFT JOIN asset_live_photos lp ON lp.asset_id=a.id
 		WHERE a.path_key=? AND a.byte_size=? AND a.modified_at_ns=?`, pathKey, byteSize, modifiedAtNS).
-		Scan(&item.ID, &item.PreviewStatus, &item.DominantColors, &item.IsLivePhoto, &item.LivePhotoVideoLength)
+		Scan(&item.ID, &item.PreviewStatus, &item.DominantColors, &item.DominantColorsVersion, &item.IsLivePhoto, &item.LivePhotoVideoLength)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -1083,7 +1096,7 @@ func (s *store) listAssets(ctx context.Context, query AssetQuery, sessionID stri
 		return AssetPage{}, err
 	}
 	args = append(args, limit+1)
-	sqlQuery := `SELECT a.id,a.relative_path,a.file_name,a.extension,a.format,a.mime_type,a.media_kind,a.byte_size,a.modified_at_ns,a.duration_ms,a.width,a.height,a.orientation,a.is_animated,a.frame_count,COALESCE(lp.is_live_photo,0),COALESCE(lp.video_mime,''),COALESCE(lp.video_length,0),a.availability,COALESCE(t.id,''),COALESCE(t.entry_kind,''),a.preview_status,a.preview_error,a.metadata_status,a.display_title,a.notes,a.rating,a.color_label,a.is_favorite,a.captured_at,a.discovered_at,a.dominant_colors,a.cloud_photo_id,a.cloud_path,a.cloud_thumb_path,a.cloud_storage_source_id,a.cloud_storage_plugin_id,a.cloud_url_type,a.cloud_remote_updated_at,a.cloud_sync_state,a.cloud_sync_error,
+	sqlQuery := `SELECT a.id,a.relative_path,a.file_name,a.extension,a.format,a.mime_type,a.media_kind,a.byte_size,a.modified_at_ns,a.duration_ms,a.width,a.height,a.orientation,a.is_animated,a.frame_count,COALESCE(lp.is_live_photo,0),COALESCE(lp.video_mime,''),COALESCE(lp.video_length,0),a.availability,COALESCE(t.id,''),COALESCE(t.entry_kind,''),a.preview_status,a.preview_error,a.metadata_status,a.display_title,a.notes,a.rating,a.color_label,a.is_favorite,a.captured_at,a.discovered_at,a.dominant_colors,a.cloud_photo_id,a.cloud_path,a.cloud_thumb_path,a.cloud_storage_source_id,a.cloud_storage_plugin_id,a.cloud_url_type,a.cloud_remote_updated_at,a.cloud_sync_state,a.cloud_sync_error,a.cloud_linked_at,
 	e.camera_make,e.camera_model,e.lens_model,e.iso,e.aperture,e.shutter_seconds,e.focal_length_mm,e.latitude,e.longitude,(SELECT COUNT(*) FROM asset_clips ac WHERE ac.asset_id=a.id),` + sortExpr + `
 	        FROM assets a LEFT JOIN folders f ON f.id=a.folder_id LEFT JOIN asset_live_photos lp ON lp.asset_id=a.id LEFT JOIN exif e ON e.asset_id=a.id LEFT JOIN trash_entries t ON t.id=a.trash_entry_id
         WHERE ` + baseWhere + ` ORDER BY ` + sortExpr + ` ` + direction + `,a.id ` + direction + ` LIMIT ?`
@@ -1113,7 +1126,8 @@ func (s *store) listAssets(ctx context.Context, query AssetQuery, sessionID stri
 		var dominantColors string
 		var cloudPhotoID, cloudPath, cloudThumbPath, cloudSourceID, cloudPluginID, cloudURLType, cloudSyncState, cloudSyncError sql.NullString
 		var cloudRemoteUpdatedAt sql.NullInt64
-		if err := rows.Scan(&item.ID, &item.RelativePath, &item.FileName, &item.Extension, &item.Format, &item.MimeType, &item.MediaKind, &item.ByteSize, &item.ModifiedAtNS, &item.DurationMS, &item.Width, &item.Height, &item.Orientation, &animated, &item.FrameCount, &livePhoto, &livePhotoVideoMIME, &livePhotoVideoLength, &item.Availability, &item.TrashEntryID, &item.TrashEntryKind, &item.PreviewStatus, &item.PreviewError, &item.MetadataStatus, &item.DisplayTitle, &item.Notes, &item.Rating, &item.ColorLabel, &favorite, &captured, &discovered, &dominantColors, &cloudPhotoID, &cloudPath, &cloudThumbPath, &cloudSourceID, &cloudPluginID, &cloudURLType, &cloudRemoteUpdatedAt, &cloudSyncState, &cloudSyncError, &cameraMake, &cameraModel, &lensModel, &iso, &aperture, &shutterSeconds, &focalLengthMM, &latitude, &longitude, &item.ClipCount, &sortValue); err != nil {
+		var cloudLinkedAt sql.NullInt64
+		if err := rows.Scan(&item.ID, &item.RelativePath, &item.FileName, &item.Extension, &item.Format, &item.MimeType, &item.MediaKind, &item.ByteSize, &item.ModifiedAtNS, &item.DurationMS, &item.Width, &item.Height, &item.Orientation, &animated, &item.FrameCount, &livePhoto, &livePhotoVideoMIME, &livePhotoVideoLength, &item.Availability, &item.TrashEntryID, &item.TrashEntryKind, &item.PreviewStatus, &item.PreviewError, &item.MetadataStatus, &item.DisplayTitle, &item.Notes, &item.Rating, &item.ColorLabel, &favorite, &captured, &discovered, &dominantColors, &cloudPhotoID, &cloudPath, &cloudThumbPath, &cloudSourceID, &cloudPluginID, &cloudURLType, &cloudRemoteUpdatedAt, &cloudSyncState, &cloudSyncError, &cloudLinkedAt, &cameraMake, &cameraModel, &lensModel, &iso, &aperture, &shutterSeconds, &focalLengthMM, &latitude, &longitude, &item.ClipCount, &sortValue); err != nil {
 			return AssetPage{}, err
 		}
 		item.IsAnimated = animated != 0
@@ -1128,6 +1142,7 @@ func (s *store) listAssets(ctx context.Context, query AssetQuery, sessionID stri
 		item.CloudStoragePluginID = cloudPluginID.String
 		item.CloudURLType = cloudURLType.String
 		item.CloudRemoteUpdatedAt = timeFromMillis(cloudRemoteUpdatedAt)
+		item.CloudLinkedAt = timeFromMillis(cloudLinkedAt)
 		item.CloudSyncState = cloudSyncState.String
 		item.CloudSyncError = cloudSyncError.String
 		item.UploadStatus = assetUploadStatus(item.CloudPhotoID)
@@ -1451,6 +1466,33 @@ func (s *store) setPreviewResult(ctx context.Context, id AssetID, status, previe
 	return err
 }
 
+// setDominantColors replaces an asset's stored palette without touching its
+// preview state. Used by the explicit "re-analyse colours" action, which
+// re-extracts from the existing thumbnail rather than regenerating a preview.
+// The version column is stamped so a later scan does not treat the fresh
+// palette as stale.
+func (s *store) setDominantColors(ctx context.Context, id AssetID, colors []string) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE assets SET dominant_colors=?,dominant_colors_version=?,technical_updated_at=? WHERE id=?`, encodeDominantColors(colors), dominantColorVersion, time.Now().UnixMilli(), id)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return newError(ErrAssetNotFound, "资产不存在", map[string]any{"id": id})
+	}
+	return nil
+}
+
+// assetColorAnalysisSource returns the fields needed to re-extract a palette:
+// the source file path and the media kind, so non-image assets are refused.
+func (s *store) assetColorAnalysisSource(ctx context.Context, id AssetID) (relativePath, mediaKind, availability string, err error) {
+	err = s.db.QueryRowContext(ctx, `SELECT relative_path,media_kind,availability FROM assets WHERE id=?`, id).
+		Scan(&relativePath, &mediaKind, &availability)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", "", newError(ErrAssetNotFound, "资产不存在", map[string]any{"id": id})
+	}
+	return relativePath, mediaKind, availability, err
+}
+
 // resetThumbnails invalidates every grid-thumbnail derivative and resets the
 // preview state of all photo-kind assets so their thumbnails regenerate on the
 // next render pass. It returns the number of affected assets.
@@ -1470,7 +1512,10 @@ func (s *store) setAssetCloudLink(ctx context.Context, id AssetID, photoID strin
 	if photoID == "" {
 		return newError(ErrInvalidPath, "云端照片 ID 不能为空", nil)
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE assets SET cloud_photo_id=?,cloud_storage_source_id=NULL,cloud_storage_plugin_id=NULL,cloud_path=NULL,cloud_thumb_path=NULL,cloud_url_type=NULL,cloud_remote_updated_at=NULL,cloud_sync_state=?,cloud_sync_error='' WHERE id=?`, photoID, CloudSyncStatePending, id)
+	linkedAt := time.Now().UnixMilli()
+	// COALESCE keeps the first link time: re-linking an asset to an already
+	// existing cloud copy must not rewrite when it was originally uploaded.
+	result, err := s.db.ExecContext(ctx, `UPDATE assets SET cloud_photo_id=?,cloud_storage_source_id=NULL,cloud_storage_plugin_id=NULL,cloud_path=NULL,cloud_thumb_path=NULL,cloud_url_type=NULL,cloud_remote_updated_at=NULL,cloud_sync_state=?,cloud_sync_error='',cloud_linked_at=COALESCE(cloud_linked_at,?) WHERE id=?`, photoID, CloudSyncStatePending, linkedAt, id)
 	if err != nil {
 		return err
 	}
@@ -1481,7 +1526,7 @@ func (s *store) setAssetCloudLink(ctx context.Context, id AssetID, photoID strin
 }
 
 func (s *store) clearAssetCloudLink(ctx context.Context, id AssetID) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE assets SET cloud_photo_id=NULL,cloud_storage_source_id=NULL,cloud_storage_plugin_id=NULL,cloud_path=NULL,cloud_thumb_path=NULL,cloud_url_type=NULL,cloud_remote_updated_at=NULL,cloud_sync_state=NULL,cloud_sync_error=NULL WHERE id=?`, id)
+	result, err := s.db.ExecContext(ctx, `UPDATE assets SET cloud_photo_id=NULL,cloud_storage_source_id=NULL,cloud_storage_plugin_id=NULL,cloud_path=NULL,cloud_thumb_path=NULL,cloud_url_type=NULL,cloud_remote_updated_at=NULL,cloud_sync_state=NULL,cloud_sync_error=NULL,cloud_linked_at=NULL WHERE id=?`, id)
 	if err != nil {
 		return err
 	}
@@ -1535,6 +1580,69 @@ func (s *store) applyCloudPhotoChanges(ctx context.Context, changes []CloudPhoto
 		}
 	}
 	return tx.Commit()
+}
+
+// cloudObjectRegistration is the local projection of one object the cloud has
+// registered for a storage source. Storage maintenance compares these keys
+// against what the plugin source actually holds: a registered key with no
+// object on the source is "missing", an object with no registered key is an
+// orphan.
+type cloudObjectRegistration struct {
+	AssetID    AssetID
+	PhotoID    string
+	Title      string
+	Path       string
+	ThumbPath  string
+	HasThumb   bool
+	UploadedAt *time.Time
+}
+
+// cloudObjectRegistrations lists every active, cloud-linked asset for one
+// storage source. ThumbPath is reported separately so maintenance can tell a
+// missing original from a missing thumbnail, and HasThumb records whether the
+// cloud ever received a thumbnail key for the object.
+func (s *store) cloudObjectRegistrations(ctx context.Context, sourceID string) ([]cloudObjectRegistration, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, COALESCE(cloud_photo_id,''), COALESCE(display_title,''),
+		       COALESCE(cloud_path,''), COALESCE(cloud_thumb_path,''), cloud_linked_at
+		FROM assets
+		WHERE availability='active' AND cloud_storage_source_id=?
+		  AND cloud_photo_id IS NOT NULL AND cloud_photo_id!=''`, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]cloudObjectRegistration, 0)
+	for rows.Next() {
+		var item cloudObjectRegistration
+		var linkedAt sql.NullInt64
+		if err := rows.Scan(&item.AssetID, &item.PhotoID, &item.Title, &item.Path, &item.ThumbPath, &linkedAt); err != nil {
+			return nil, err
+		}
+		if item.Path == "" {
+			continue
+		}
+		item.HasThumb = item.ThumbPath != ""
+		item.UploadedAt = timeFromMillis(linkedAt)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// cloudObjectOwnerByKey indexes registrations by object key so a source listing
+// can resolve "does this object have an owner?" in O(1). Only originals are
+// indexed: a thumbnail key is never treated as an owner of its own object.
+func cloudObjectOwnerByKey(items []cloudObjectRegistration) map[string]cloudObjectRegistration {
+	owners := make(map[string]cloudObjectRegistration, len(items))
+	for _, item := range items {
+		if item.Path == "" {
+			continue
+		}
+		if _, exists := owners[item.Path]; !exists {
+			owners[item.Path] = item
+		}
+	}
+	return owners
 }
 
 func (s *store) cloudSyncStatus(ctx context.Context) (CloudSyncStatus, error) {

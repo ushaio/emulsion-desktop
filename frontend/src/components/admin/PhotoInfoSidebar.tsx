@@ -107,6 +107,8 @@ export function PhotoInfoSidebar({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [shootingOpen, setShootingOpen] = useState(true);
   const [infoOpen, setInfoOpen] = useState(true);
+  /* 「文件信息」独立折叠状态（存储路径 / 资源地址）。 */
+  const [fileInfoOpen, setFileInfoOpen] = useState(true);
   // Provider-real URLs for desktop-plugin photos whose cloud URL is null
   // (e.g. WebDAV sources); resolved asynchronously from the source config.
   const [realThumbUrl, setRealThumbUrl] = useState<string | null>(null);
@@ -266,8 +268,8 @@ export function PhotoInfoSidebar({
     cameraLabel || photo.lensModel || cameraParameters.length > 0,
   );
   const fileSizeLabel = photo.size ? formatFileSize(photo.size) : null;
-  /* 照片信息：短字段走两列卡片网格，长字段（主色 / 路径 / 资源地址）在网格外整宽展示 */
-  const metaCards = [
+  /* 基本信息：尺寸 / 大小 / 时间 / 存储提供方（短字段，两列卡片网格） */
+  const basicCards = [
     {
       key: "dimensions",
       label: t("gallery.dimensions"),
@@ -566,16 +568,15 @@ export function PhotoInfoSidebar({
         subtitle={storagePath || LIBRARY_EMPTY_VALUE}
       />
 
-      {/* ── 照片信息（两列卡片网格，参考稿把基本信息放在拍摄参数之前） ── */}
+      {/* ── 基本信息：尺寸 / 大小 / 时间 / 存储提供方（两列卡片网格） ── */}
       <LibraryDetailsSection
         label={t("admin.basic_info")}
         icon={FileText}
         open={infoOpen}
         onToggle={() => setInfoOpen((v) => !v)}
       >
-        {/* 短字段：两列卡片网格，与上方拍摄参数同一套视觉 */}
         <div className="grid grid-cols-2 gap-2">
-          {metaCards.map((item) => (
+          {basicCards.map((item) => (
             <LibraryMetaRow
               key={item.key}
               label={item.label}
@@ -585,7 +586,15 @@ export function PhotoInfoSidebar({
             />
           ))}
         </div>
+      </LibraryDetailsSection>
 
+      {/* ── 照片信息：色彩分析（点击复制色值 + 重新分析）＋ 拍摄参数 ── */}
+      <LibraryDetailsSection
+        label={t("admin.photo_info")}
+        icon={Camera}
+        open={shootingOpen}
+        onToggle={() => setShootingOpen((v) => !v)}
+      >
         {/* 主色（云端专属：点击复制色值 + 重新分析） */}
         {dominantColors.length > 0 && (
           <LibraryFieldBlock
@@ -614,7 +623,28 @@ export function PhotoInfoSidebar({
           </LibraryFieldBlock>
         )}
 
-        {/* 存储路径（云端专属，整宽展示） */}
+        {/* 拍摄参数（有 EXIF 才显示，两列卡片网格） */}
+        {hasExif && (
+          <div className={dominantColors.length > 0 ? "mt-3" : undefined}>
+            <CameraParameters
+              cameraLabel={t("admin.camera")}
+              cameraValue={cameraLabel}
+              lensLabel={t("admin.lens")}
+              lensValue={photo.lensModel}
+              parameters={cameraParameters}
+            />
+          </div>
+        )}
+      </LibraryDetailsSection>
+
+      {/* ── 文件信息：存储路径 + 资源地址（整宽展示） ── */}
+      <LibraryDetailsSection
+        label={t("admin.file_info")}
+        icon={FileText}
+        open={fileInfoOpen}
+        onToggle={() => setFileInfoOpen((v) => !v)}
+      >
+        {/* 存储路径 */}
         <LibraryFieldBlock
           label={t("admin.path_prefix")}
           action={
@@ -632,7 +662,7 @@ export function PhotoInfoSidebar({
           <LibraryMonoValue value={storagePath} />
         </LibraryFieldBlock>
 
-        {/* 资源地址（云端专属，整宽展示） */}
+        {/* 资源地址 */}
         {copyableUrls.map((item) => (
           <LibraryFieldBlock
             key={item.key}
@@ -649,30 +679,10 @@ export function PhotoInfoSidebar({
               </button>
             }
           >
-            <LibraryMonoValue
-              value={item.value || t("admin.not_available")}
-            />
+            <LibraryMonoValue value={item.value || t("admin.not_available")} />
           </LibraryFieldBlock>
         ))}
       </LibraryDetailsSection>
-
-      {/* ── 拍摄参数（有 EXIF 才显示，两列卡片网格） ── */}
-      {hasExif && (
-        <LibraryDetailsSection
-          label={t("admin.shooting_info")}
-          icon={Camera}
-          open={shootingOpen}
-          onToggle={() => setShootingOpen((v) => !v)}
-        >
-          <CameraParameters
-            cameraLabel={t("admin.camera")}
-            cameraValue={cameraLabel}
-            lensLabel={t("admin.lens")}
-            lensValue={photo.lensModel}
-            parameters={cameraParameters}
-          />
-        </LibraryDetailsSection>
-      )}
 
       {/* ── 操作区（常驻贴底，参考稿：查看原图 + 删除） ── */}
       <LibraryDetailsFooter>

@@ -41,6 +41,11 @@ func (a *App) syncStorageSourceToCloud(source storage_plugins.SourceDTO, removin
 		"id":           source.ID,
 		"name":         source.Name,
 		"type":         cloudSourceType(source.PluginID),
+		// vendor is the cross-platform product label (cloudflare-r2, qiniu-kodo,
+		// ...). The cloud stores it verbatim so both ends agree on where a photo
+		// physically lives — something `type` cannot express, since every
+		// S3-compatible provider collapses to "s3".
+		"vendor":       sourceVendor(source),
 		"bucket":       firstConfigValue(source.Config, "bucket"),
 		"region":       firstConfigValue(source.Config, "region"),
 		"endpoint":     firstConfigValue(source.Config, "endpoint"),
@@ -76,4 +81,15 @@ func cloudSourceType(pluginID string) string {
 	default:
 		return ""
 	}
+}
+
+// sourceVendor prefers the value already resolved on the DTO and re-derives it
+// only when a caller hand-built the DTO (DeleteDesktopStorageSource does this).
+// Re-deriving keeps the payload correct without forcing every call site to
+// remember to populate Vendor.
+func sourceVendor(source storage_plugins.SourceDTO) string {
+	if source.Vendor != "" {
+		return source.Vendor
+	}
+	return storage_plugins.InferVendor(source.PluginID, source.Config)
 }

@@ -261,10 +261,48 @@ func (a *App) TestDesktopStorageSource(sourceID string) (storage_plugins.HealthR
 }
 
 // ─── Storage Scan/Cleanup ─────────────────────────────
+//
+// Storage maintenance is driven entirely by the desktop storage plugins: the
+// object listing comes from the plugin runtime and the ownership records come
+// from the local library's cloud projection. Nothing here forwards to the web
+// admin API, so the page works without a server connection.
 
 func (a *App) ScanStorage(params services.StorageScanParams) (*services.StorageScanResult, error) {
-	return a.Storage.Scan(params)
+	if a.StorageMaintenance == nil {
+		return nil, errors.New("存储整理服务未初始化")
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return a.StorageMaintenance.Scan(ctx, params.Provider)
 }
+
 func (a *App) CleanupStorage(keys []string, provider string) (*services.StorageCleanupResult, error) {
-	return a.Storage.Cleanup(keys, provider)
+	if a.StorageMaintenance == nil {
+		return nil, errors.New("存储整理服务未初始化")
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return a.StorageMaintenance.Cleanup(ctx, provider, keys)
+}
+
+// FixMissingPhotos unlinks local library records whose objects are gone from the
+// storage source. It is a purely local repair and never deletes a remote photo.
+func (a *App) FixMissingPhotos(photoIDs []string) (*services.FixMissingPhotosResult, error) {
+	if a.StorageMaintenance == nil {
+		return nil, errors.New("存储整理服务未初始化")
+	}
+	return a.StorageMaintenance.FixMissing(photoIDs)
+}
+
+// GenerateThumbnail re-queues thumbnail generation in the local derivative
+// pipeline for the given library asset.
+func (a *App) GenerateThumbnail(photoID string) error {
+	if a.StorageMaintenance == nil {
+		return errors.New("存储整理服务未初始化")
+	}
+	return a.StorageMaintenance.GenerateThumbnail(photoID)
 }

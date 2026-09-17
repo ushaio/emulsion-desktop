@@ -31,8 +31,8 @@ import { useCachedPageEffect } from '@/hooks/useCachedPageEffect'
 import { getErrorMessage } from '@/lib/auth-errors'
 import { t } from '@/lib/i18n'
 import { usePreferences } from '@/store/preferences'
-import { CleanupStorage, FixMissingPhotos, GenerateThumbnail, GetStorageSources, ScanStorage } from '../../wailsjs/go/main/App'
-import type { services, types } from '../../wailsjs/go/models'
+import { CleanupStorage, FixMissingPhotos, GenerateThumbnail, GetDesktopStorageSources, ScanStorage } from '../../wailsjs/go/main/App'
+import type { services, storage_plugins } from '../../wailsjs/go/models'
 
 // ── 工具函数 ─────────────────────────────────────────────────
 
@@ -55,6 +55,12 @@ function isImageFile(key: string): boolean {
 function folderOf(key: string): string {
   const lastSlash = key.lastIndexOf('/')
   return lastSlash >= 0 ? key.substring(0, lastSlash) : '/'
+}
+
+// 缺失对象在源上已不存在，没有可展示的地址；只有源上真实存在的图片才能预览。
+function canPreview(file: Pick<services.StorageObjectDTO, 'key' | 'url' | 'status'>): boolean {
+  if (!isImageFile(file.key) || !file.url) return false
+  return file.status !== 'missing_original' && file.status !== 'missing_thumbnail'
 }
 
 // ── 持久化（与照片库/胶卷一致：localStorage + mo-gallery 前缀）──
@@ -199,26 +205,57 @@ function defaultExpandedFolders(nodes: FolderTreeNode[]): Set<string> {
 
 interface ProviderOption {
   value: string
-  label?: string
-  labelKey?: string
+  label: string
   icon: LucideIcon
+  /** Concrete storage product, used as a secondary label and for the icon. */
+  vendor?: string
+  vendorLabel?: string
 }
 
-const BUILTIN_PROVIDERS: ProviderOption[] = [
-  { value: 'local', labelKey: 'admin.storage_provider_local', icon: HardDrive },
-  { value: 's3', label: 'S3', icon: Cloud },
-  { value: 'github', labelKey: 'admin.storage_provider_github', icon: Github },
-]
+// Human-readable names for the vendor ids shared with the web server. Unknown
+// ids fall through to the raw value so a newly added provider still renders
+// something meaningful instead of an empty label.
+const VENDOR_LABELS: Record<string, string> = {
+  'cloudflare-r2': 'Cloudflare R2',
+  'qiniu-kodo': '七牛云 Kodo',
+  'aliyun-oss': '阿里云 OSS',
+  'tencent-cos': '腾讯云 COS',
+  'aws-s3': 'AWS S3',
+  minio: 'MinIO',
+  github: 'GitHub',
+  local: '本地',
+}
 
-function getProviders(sources: types.StorageSourceDTO[]): ProviderOption[] {
-  const sourceProviders: ProviderOption[] = sources
-    .filter(s => s.type !== 'local' && s.type)
-    .map(s => ({
-      value: s.id,
-      label: s.name || s.type,
-      icon: s.type === 'github' ? Github : Cloud,
+function vendorLabel(vendor?: string): string {
+  if (!vendor) return ''
+  return VENDOR_LABELS[vendor] ?? vendor
+}
+
+// Desktop storage sources come from the installed storage plugins, so the
+// provider list is derived from SourceDTO rather than the legacy web
+// local/s3/github enum. Only enabled sources can be scanned: a disabled plugin
+// has no runtime to list objects with.
+//
+// The icon keys off vendor first: several providers share the s3-compatible
+// plugin, and "which product is this?" is the more useful distinction than
+// "which adapter speaks to it?".
+function sourceIcon(pluginId: string, vendor?: string): LucideIcon {
+  const key = (vendor || pluginId).toLowerCase()
+  if (key.includes('github')) return Github
+  if (key.includes('webdav') || key.includes('local') || key === 'local' || key.includes('fs')) return HardDrive
+  return Cloud
+}
+
+function getProviders(sources: storage_plugins.SourceDTO[]): ProviderOption[] {
+  return sources
+    .filter(source => source.enabled)
+    .map(source => ({
+      value: source.id,
+      label: source.name || source.pluginId || source.id,
+      icon: sourceIcon(source.pluginId ?? '', source.vendor),
+      vendor: source.vendor,
+      vendorLabel: vendorLabel(source.vendor),
     }))
-  return [...BUILTIN_PROVIDERS, ...sourceProviders]
 }
 
 interface StatusMeta {
@@ -293,12 +330,14 @@ function StatusPill({ status, language }: { status: string; language: 'zh' | 'en
   )
 }
 
-function FileThumb({ file }: { file: services.StorageFileDTO }) {
+function FileThumb({ file }: { file: services.StorageObjectDTO }) {
   const [failed, setFailed] = useState(false)
-  const showImage = isImageFile(file.key) && Boolean(file.url) && !failed && file.status !== 'missing'
+  // 缺失对象在源上已不存在，不能再去取图：占位图标直接表达状态。
+  const isMissing = file.status === 'missing_original' || file.status === 'missing_thumbnail'
+  const showImage = isImageFile(file.key) && Boolean(file.url) && !failed && !isMissing
 
   let placeholder = <FileImage size={15} style={{ color: 'var(--muted-foreground)' }} />
-  if (file.status === 'missing') placeholder = <FileWarning size={15} className="text-red-400" />
+  if (file.status === 'missing_original') placeholder = <FileWarning size={15} className="text-red-400" />
   else if (file.status === 'missing_thumbnail') placeholder = <ImageOff size={15} className="text-orange-400" />
 
   return (
@@ -317,12 +356,11 @@ function FileThumb({ file }: { file: services.StorageFileDTO }) {
 
 function StorageCleanupPage() {
   const { language } = usePreferences()
-  const [storageSources, setStorageSources] = useState<types.StorageSourceDTO[]>([])
-  const [provider, setProvider] = useState(() => {
-    const stored = readLocal(PROVIDER_KEY, 'local')
-    return BUILTIN_PROVIDERS.some(p => p.value === stored) ? stored : 'local'
-  })
-  const [files, setFiles] = useState<services.StorageFileDTO[]>([])
+  const [storageSources, setStorageSources] = useState<storage_plugins.SourceDTO[]>([])
+  const [provider, setProvider] = useState(() => readLocal(PROVIDER_KEY, ''))
+  const [files, setFiles] = useState<services.StorageObjectDTO[]>([])
+  const [scanVendor, setScanVendor] = useState('')
+  const [scanSourceName, setScanSourceName] = useState('')
   const [stats, setStats] = useState<services.StorageScanStats>({
     total: 0, linked: 0, orphan: 0, missing: 0, missingOriginal: 0, missingThumbnail: 0,
   })
@@ -352,14 +390,21 @@ function StorageCleanupPage() {
   // ── 数据加载 ─────────────────────────────────────────────
 
   const loadFiles = useCallback(async () => {
+    if (!provider) {
+      setFiles([])
+      setScanVendor('')
+      setScanSourceName('')
+      setStats({ total: 0, linked: 0, orphan: 0, missing: 0, missingOriginal: 0, missingThumbnail: 0 })
+      setSelected(new Set())
+      return
+    }
     setLoading(true)
     try {
-      const result = await ScanStorage({
-        provider,
-        status: statusFilter || undefined,
-        search: search || undefined,
-      })
+      // 状态筛选在客户端完成（见 baseList），此处只按源取完整清单。
+      const result = await ScanStorage({ provider })
       setFiles(result?.files || [])
+      setScanVendor(result?.vendor || '')
+      setScanSourceName(result?.sourceName || '')
       setStats(result?.stats || { total: 0, linked: 0, orphan: 0, missing: 0, missingOriginal: 0, missingThumbnail: 0 })
       // 裁剪已不在结果中的选中项
       setSelected(prev => {
@@ -371,36 +416,45 @@ function StorageCleanupPage() {
     } finally {
       setLoading(false)
     }
-  }, [provider, statusFilter, search])
+  }, [provider])
 
   const fetchSources = useCallback(async () => {
     try {
-      const result = await GetStorageSources()
+      const result = await GetDesktopStorageSources()
       setStorageSources(result || [])
     } catch {}
   }, [])
 
   const providers = useMemo(() => getProviders(storageSources), [storageSources])
 
-  // 同步存储源列表后检查 provider 有效性
+  // 同步存储源列表后校正 provider：仅在当前源失效时切到第一个可用源。
+  // 首次进入时 provider 为空，这里会选中第一个插件源，从而触发首次扫描。
   useEffect(() => {
-    if (storageSources.length > 0 && !providers.some(p => p.value === provider)) {
-      const timer = window.setTimeout(() => {
-        setProvider('local')
-        writeLocal(PROVIDER_KEY, 'local')
-      }, 0)
-      return () => window.clearTimeout(timer)
-    }
-  }, [storageSources, providers, provider])
+    if (providers.length === 0) return
+    if (providers.some(p => p.value === provider)) return
+    const timer = window.setTimeout(() => {
+      const next = providers[0].value
+      setProvider(next)
+      writeLocal(PROVIDER_KEY, next)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [providers, provider])
 
   // 首次进入自动扫描；菜单页常驻缓存后，切回本页不再重复扫描，
-  // 需要最新结果时使用工具栏的「扫描 / 刷新」按钮（切换存储源或筛选条件仍会自动重扫）
+  // 需要最新结果时使用工具栏的「扫描 / 刷新」按钮（切换存储源仍会自动重扫）
+  //
+  // 存储源列表与文件清单分开加载：清单依赖 provider，而 provider 由下面那个
+  // 校正 effect 在拿到插件源列表后写入。两者合在一个 effect 里会在首次进入时
+  // 用空 provider 抢先跑一次扫描，白跑一趟且让校正 effect 的 setProvider 白费。
   useCachedPageEffect(() => {
     void fetchSources()
-    void loadFiles()
-  }, [loadFiles, fetchSources])
+  }, [fetchSources])
 
-  // 搜索防抖（400ms 自动触发扫描）
+  useCachedPageEffect(() => {
+    void loadFiles()
+  }, [loadFiles])
+
+  // 搜索防抖（400ms 自动触发本地过滤）
   useEffect(() => {
     const handle = window.setTimeout(() => setSearch(searchInput.trim()), 400)
     return () => window.clearTimeout(handle)
@@ -421,12 +475,32 @@ function StorageCleanupPage() {
     setSearch('')
   }
 
-  // ── 客户端过滤：仅异常 + 文件夹 ─────────────────────────
+  // ── 客户端过滤：状态 + 搜索 + 仅异常 + 文件夹 ───────────
+  //
+  // 这些筛选全部在客户端完成：后端一次返回该源的完整对象清单，
+  // 「missing」又是 missing_original 与 missing_thumbnail 的聚合视图，
+  // 交给服务端反而无法用单值匹配。
 
-  const baseList = useMemo(
-    () => (issuesOnly ? files.filter(f => f.status !== 'linked') : files),
-    [files, issuesOnly],
-  )
+  const matchesStatus = useCallback((file: services.StorageObjectDTO) => {
+    if (!statusFilter) return true
+    if (statusFilter === 'missing') {
+      return file.status === 'missing_original' || file.status === 'missing_thumbnail'
+    }
+    return file.status === statusFilter
+  }, [statusFilter])
+
+  const baseList = useMemo(() => {
+    let list = files
+    if (search) {
+      const needle = search.toLowerCase()
+      list = list.filter(file =>
+        file.key.toLowerCase().includes(needle) ||
+        (file.photoTitle || '').toLowerCase().includes(needle),
+      )
+    }
+    if (statusFilter) list = list.filter(matchesStatus)
+    return issuesOnly ? list.filter(f => f.status !== 'linked') : list
+  }, [files, issuesOnly, statusFilter, search, matchesStatus])
 
   const visibleFiles = useMemo(() => {
     if (!folderFilter) return baseList
@@ -543,12 +617,15 @@ function StorageCleanupPage() {
   const handleCleanup = async () => {
     if (selected.size === 0 || cleanupDeleting) return
 
+    // 孤立文件：源上存在、但没有任何照片记录引用 → 真正从源上删除。
     const orphanKeys = files
       .filter(f => selected.has(f.key) && f.status === 'orphan')
       .map(f => f.key)
 
+    // 缺失文件：照片记录存在、但源上对象已不在 → 这不是删除源文件，而是
+    // 由后端清理本地资源库里指向空对象的失效投影记录。
     const missingIds = files
-      .filter(f => selected.has(f.key) && f.status === 'missing' && f.photoId)
+      .filter(f => selected.has(f.key) && f.photoId && (f.status === 'missing_original' || f.status === 'missing_thumbnail'))
       .map(f => f.photoId!)
 
     setCleanupDeleting(true)
@@ -572,7 +649,7 @@ function StorageCleanupPage() {
     }
   }
 
-  const handleGenerateThumb = async (file: services.StorageFileDTO) => {
+  const handleGenerateThumb = async (file: services.StorageObjectDTO) => {
     if (!file.photoId) return
     setGeneratingThumb(prev => new Set(prev).add(file.photoId!))
     try {
@@ -617,9 +694,9 @@ function StorageCleanupPage() {
           ariaLabel={t('admin.storage_provider', language)}
           value={provider}
           onChange={switchProvider}
-          options={providers.map(({ value, label, labelKey, icon }) => ({
+          options={providers.map(({ value, label, icon }) => ({
             value,
-            label: labelKey ? t(labelKey, language) : (label || value),
+            label: label || value,
             icon,
           }))}
         />
@@ -649,6 +726,19 @@ function StorageCleanupPage() {
           {t('admin.storage_only_issues', language)}
         </button>
 
+        {/* 存储产品标识：「s3-compatible」这类协议族名看不出实际存在哪，
+            vendor 是两端共享的具体产品标识，这里直接展示以便确认扫的是哪个桶。 */}
+        {scanVendor && (
+          <span
+            className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium"
+            style={{ borderColor: 'var(--border)', color: 'var(--muted-foreground)' }}
+            title={scanSourceName ? `${scanSourceName} · ${scanVendor}` : scanVendor}
+          >
+            <Cloud size={12} />
+            {vendorLabel(scanVendor)}
+          </span>
+        )}
+
         {/* 搜索 */}
         <div className="relative min-w-0 max-w-sm flex-1">
           <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--muted-foreground)' }} />
@@ -675,7 +765,7 @@ function StorageCleanupPage() {
 
         <button
           onClick={() => void loadFiles()}
-          disabled={loading}
+          disabled={loading || !provider}
           className="ml-auto flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-50"
           style={{ backgroundColor: 'var(--primary)', color: 'var(--primary-foreground)' }}
         >
@@ -899,7 +989,14 @@ function StorageCleanupPage() {
 
           {/* 文件行 */}
           <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto">
-            {loading ? (
+            {providers.length === 0 ? (
+              <div className="flex h-full min-h-48 flex-col items-center justify-center gap-3 p-6 text-center" style={{ color: 'var(--muted-foreground)' }}>
+                <span className="flex size-14 items-center justify-center rounded-lg" style={{ backgroundColor: 'var(--muted)' }}>
+                  <Cloud size={24} />
+                </span>
+                <p className="text-sm">{t('admin.storage_no_sources', language)}</p>
+              </div>
+            ) : loading ? (
               Array.from({ length: 6 }, (_, index) => (
                 <div key={index} className="flex items-center gap-3 border-b px-3 py-2" style={{ borderColor: 'var(--border)' }}>
                   <div className="size-4 shrink-0 animate-pulse rounded" style={{ backgroundColor: 'var(--muted)' }} />
@@ -957,14 +1054,13 @@ function StorageCleanupPage() {
                         disabled={file.status === 'linked'}
                         title={file.status === 'linked' ? t('admin.storage_help_linked', language) : undefined}
                       />
-                    </span>
-                    <FileThumb file={file} />
+                    </span>                    <FileThumb file={file} />
                     <div className="min-w-0 flex-1">
                       <div
-                        className={`truncate font-mono text-xs ${isImageFile(file.key) ? 'cursor-pointer hover:text-primary hover:underline' : ''}`}
+                        className={`truncate font-mono text-xs ${canPreview(file) ? 'cursor-pointer hover:text-primary hover:underline' : ''}`}
                         title={file.key}
                         onClick={() => {
-                          if (isImageFile(file.key)) setPreviewUrl(file.url)
+                          if (canPreview(file)) setPreviewUrl(file.url)
                         }}
                       >
                         {name}
@@ -984,7 +1080,7 @@ function StorageCleanupPage() {
                       <StatusPill status={file.status} language={language} />
                     </span>
                     <span className="flex w-14 shrink-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100">
-                      {isImageFile(file.key) && (
+                      {canPreview(file) && (
                         <button
                           type="button"
                           onClick={() => setPreviewUrl(file.url)}
@@ -995,16 +1091,17 @@ function StorageCleanupPage() {
                           <Eye size={13} />
                         </button>
                       )}
-                      {file.status === 'linked' && !file.hasThumb && (
+                      {/* 原图在、缩略图丢失时允许重新生成缓存 */}
+                      {(file.status === 'linked' || file.status === 'missing_thumbnail') && !file.hasThumb && file.photoId && (
                         <button
                           type="button"
                           onClick={() => void handleGenerateThumb(file)}
-                          disabled={generatingThumb.has(file.photoId || '')}
+                          disabled={generatingThumb.has(file.photoId)}
                           title={t('admin.storage_generate', language)}
                           className="rounded p-1 transition-colors hover:bg-secondary"
-                          style={{ color: generatingThumb.has(file.photoId || '') ? 'var(--muted-foreground)' : 'var(--primary)' }}
+                          style={{ color: generatingThumb.has(file.photoId) ? 'var(--muted-foreground)' : 'var(--primary)' }}
                         >
-                          {generatingThumb.has(file.photoId || '') ? (
+                          {generatingThumb.has(file.photoId) ? (
                             <Loader2 size={13} className="animate-spin" />
                           ) : (
                             <RefreshCw size={13} />

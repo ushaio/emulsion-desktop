@@ -112,10 +112,17 @@ func (m *Manager) reconcileKnownFile(
 			return reconcileResult{}, unchangedErr
 		}
 		if unchanged != nil {
+			// A card produced by an older revision of the extractor is stale and
+			// gets re-extracted once. Only assets that already have a card are
+			// matched, so a file that can never yield one is not re-queued on
+			// every scan — those stay governed by the empty-card check alone.
+			staleColors := unchanged.DominantColors != "" &&
+				unchanged.DominantColors != "[]" &&
+				unchanged.DominantColorsVersion < dominantColorVersion
 			// Non-photo files never get an image preview, so they are not queued
 			// for thumbnail generation even though their preview stays unavailable.
 			needPreview := isSupportedMedia(absolutePath) &&
-				(unchanged.PreviewStatus != "ready" || unchanged.DominantColors == "" || unchanged.DominantColors == "[]")
+				(unchanged.PreviewStatus != "ready" || unchanged.DominantColors == "" || unchanged.DominantColors == "[]" || staleColors)
 			// Backfill Live Photo detection for assets indexed before the
 			// feature existed. live_photo_video_length=0 (or NULL) means
 			// "never probed"; -1 means "probed, not a live photo". Only

@@ -74,12 +74,17 @@ type SourceDTO struct {
 	Name          string            `json:"name"`
 	PluginID      string            `json:"pluginId"`
 	PluginVersion string            `json:"pluginVersion,omitempty"`
-	Config        map[string]string `json:"config,omitempty"`
-	Enabled       bool              `json:"enabled"`
-	Status        string            `json:"status,omitempty"`
-	LastError     string            `json:"lastError,omitempty"`
-	CreatedAt     time.Time         `json:"createdAt"`
-	UpdatedAt     time.Time         `json:"updatedAt"`
+	// Vendor names the concrete storage product (cloudflare-r2, qiniu-kodo,
+	// ...). PluginID only identifies the protocol adapter, so it cannot tell
+	// two S3-compatible providers apart; Vendor is the cross-platform label
+	// the desktop and the web server agree on. See vendor.go.
+	Vendor    string            `json:"vendor,omitempty"`
+	Config    map[string]string `json:"config,omitempty"`
+	Enabled   bool              `json:"enabled"`
+	Status    string            `json:"status,omitempty"`
+	LastError string            `json:"lastError,omitempty"`
+	CreatedAt time.Time         `json:"createdAt"`
+	UpdatedAt time.Time         `json:"updatedAt"`
 }
 
 type Manifest struct {
@@ -281,6 +286,10 @@ type ObjectInfo struct {
 	Checksum    string     `json:"checksum,omitempty"`
 	Version     string     `json:"version,omitempty"`
 	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
+	// LastModified carries the provider's own modification stamp (RFC 3339 or
+	// an equivalent textual form). It is optional: not every plugin reports it,
+	// so callers must tolerate an empty value.
+	LastModified string `json:"lastModified,omitempty"`
 }
 
 type PutRequest struct {

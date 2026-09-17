@@ -443,7 +443,7 @@ func (s *store) setPreviewResults(ctx context.Context, writes []previewWrite) er
 		return err
 	}
 	defer tx.Rollback()
-	withColors, err := tx.PrepareContext(ctx, `UPDATE assets SET preview_status=?,preview_error=?,dominant_colors=?,technical_updated_at=? WHERE id=?`)
+	withColors, err := tx.PrepareContext(ctx, `UPDATE assets SET preview_status=?,preview_error=?,dominant_colors=?,dominant_colors_version=?,technical_updated_at=? WHERE id=?`)
 	if err != nil {
 		return err
 	}
@@ -456,7 +456,7 @@ func (s *store) setPreviewResults(ctx context.Context, writes []previewWrite) er
 	now := time.Now().UnixMilli()
 	for _, write := range writes {
 		if write.SetColors {
-			if _, err := withColors.ExecContext(ctx, write.Status, boundedError(write.Error), encodeDominantColors(write.Colors), now, write.ID); err != nil {
+			if _, err := withColors.ExecContext(ctx, write.Status, boundedError(write.Error), encodeDominantColors(write.Colors), dominantColorVersion, now, write.ID); err != nil {
 				return err
 			}
 			continue
@@ -475,11 +475,19 @@ func (s *store) setPreviewResults(ctx context.Context, writes []previewWrite) er
 func (s *store) pendingThumbnailAssets(ctx context.Context, onlyMissing bool) ([]thumbnailCandidate, error) {
 	query := `SELECT id,format,extension FROM assets
 		WHERE availability='active' AND media_kind IN ('image','live-photo')`
+	args := make([]any, 0, 1)
 	if onlyMissing {
-		query += ` AND (preview_status IN ('pending','generating') OR (preview_status='ready' AND (dominant_colors='[]' OR dominant_colors='')))`
+		// The last clause is the palette backfill. It deliberately matches only
+		// assets that already have a card: an asset that never got one is caught
+		// by the empty-card clause above, and limiting it this way means a file
+		// that can never produce a palette cannot be re-queued forever.
+		query += ` AND (preview_status IN ('pending','generating')
+			OR (preview_status='ready' AND (dominant_colors='[]' OR dominant_colors=''))
+			OR (dominant_colors NOT IN ('','[]') AND dominant_colors_version < ?))`
+		args = append(args, dominantColorVersion)
 	}
 	query += ` ORDER BY relative_path`
-	rows, err := s.db.QueryContext(ctx, query)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

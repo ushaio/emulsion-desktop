@@ -38,6 +38,10 @@ node_modules/
 .env
 .env.*
 
+# local dev logs and ad-hoc build artifacts in repo root
+*.log
+/*.exe
+
 # wails windows resource object (generated at build time)
 *.syso
 

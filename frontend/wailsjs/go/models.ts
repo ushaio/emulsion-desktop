@@ -843,6 +843,8 @@ export namespace local_library {
 	    cloudUrlType?: string;
 	    // Go type: time
 	    cloudRemoteUpdatedAt?: any;
+	    // Go type: time
+	    cloudLinkedAt?: any;
 	    cloudSyncState?: string;
 	    cloudSyncError?: string;
 	    uploadStatus: string;
@@ -901,6 +903,7 @@ export namespace local_library {
 	        this.cloudStoragePluginId = source["cloudStoragePluginId"];
 	        this.cloudUrlType = source["cloudUrlType"];
 	        this.cloudRemoteUpdatedAt = this.convertValues(source["cloudRemoteUpdatedAt"], null);
+	        this.cloudLinkedAt = this.convertValues(source["cloudLinkedAt"], null);
 	        this.cloudSyncState = source["cloudSyncState"];
 	        this.cloudSyncError = source["cloudSyncError"];
 	        this.uploadStatus = source["uploadStatus"];
@@ -3981,7 +3984,7 @@ export namespace services {
 	        this.errors = source["errors"];
 	    }
 	}
-	export class StorageFileDTO {
+	export class StorageObjectDTO {
 	    key: string;
 	    url: string;
 	    size: number;
@@ -3993,7 +3996,7 @@ export namespace services {
 	    hasThumb?: boolean;
 	
 	    static createFrom(source: any = {}) {
-	        return new StorageFileDTO(source);
+	        return new StorageObjectDTO(source);
 	    }
 	
 	    constructor(source: any = {}) {
@@ -4048,8 +4051,10 @@ export namespace services {
 	    }
 	}
 	export class StorageScanResult {
-	    files: StorageFileDTO[];
+	    files: StorageObjectDTO[];
 	    stats: StorageScanStats;
+	    vendor?: string;
+	    sourceName?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new StorageScanResult(source);
@@ -4057,8 +4062,10 @@ export namespace services {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.files = this.convertValues(source["files"], StorageFileDTO);
+	        this.files = this.convertValues(source["files"], StorageObjectDTO);
 	        this.stats = this.convertValues(source["stats"], StorageScanStats);
+	        this.vendor = source["vendor"];
+	        this.sourceName = source["sourceName"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -4615,6 +4622,7 @@ export namespace storage_plugins {
 	    version?: string;
 	    // Go type: time
 	    expiresAt?: any;
+	    lastModified?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ObjectInfo(source);
@@ -4630,6 +4638,7 @@ export namespace storage_plugins {
 	        this.checksum = source["checksum"];
 	        this.version = source["version"];
 	        this.expiresAt = this.convertValues(source["expiresAt"], null);
+	        this.lastModified = source["lastModified"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -4915,6 +4924,7 @@ export namespace storage_plugins {
 	    name: string;
 	    pluginId: string;
 	    pluginVersion?: string;
+	    vendor?: string;
 	    config?: Record<string, string>;
 	    enabled: boolean;
 	    status?: string;
@@ -4934,6 +4944,7 @@ export namespace storage_plugins {
 	        this.name = source["name"];
 	        this.pluginId = source["pluginId"];
 	        this.pluginVersion = source["pluginVersion"];
+	        this.vendor = source["vendor"];
 	        this.config = source["config"];
 	        this.enabled = source["enabled"];
 	        this.status = source["status"];

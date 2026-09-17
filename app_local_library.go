@@ -442,6 +442,13 @@ func (a *App) RetryLocalAssetPreviews(ids []string) ([]local_library.AssetMainte
 	return a.LocalLibrary.RetryAssetPreviews(assetIDs)
 }
 
+// ReanalyzeLocalAssetColors re-extracts an asset's dominant colours from its
+// original file, mirroring the cloud panel's "re-analyse" action. It returns
+// the refreshed palette so the caller can update in place without a refetch.
+func (a *App) ReanalyzeLocalAssetColors(id string) ([]string, error) {
+	return a.LocalLibrary.ReanalyzeAssetColors(local_library.AssetID(id))
+}
+
 func (a *App) RemoveMissingLocalAssets(ids []string) ([]local_library.AssetMaintenanceResult, error) {
 	assetIDs := make([]local_library.AssetID, len(ids))
 	for index, id := range ids {

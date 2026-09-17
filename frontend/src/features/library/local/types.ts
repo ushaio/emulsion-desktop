@@ -222,6 +222,8 @@ export interface LocalAsset {
   cloudStoragePluginId?: string
   cloudUrlType?: string
   cloudRemoteUpdatedAt?: string
+  /** When this asset was linked to its cloud copy (drives the「上传时间」field). */
+  cloudLinkedAt?: string
   cloudSyncState?: 'synced' | 'pending' | 'conflict' | 'deleted_remote' | 'error' | string
   cloudSyncError?: string
   uploadStatus: AssetUploadStatus

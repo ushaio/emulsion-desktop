@@ -155,7 +155,7 @@ export function FinishEditorAiMessage(arg1:services.EditorAiMessageFinishInput):
 
 export function FixMissingPhotos(arg1:Array<string>):Promise<services.FixMissingPhotosResult>;
 
-export function GenerateThumbnail(arg1:string):Promise<services.PhotoDTO>;
+export function GenerateThumbnail(arg1:string):Promise<void>;
 
 export function GetAgentExtensionSnapshot():Promise<agent_extensions.AgentExtensionSnapshot>;
 
@@ -178,8 +178,6 @@ export function GetBlog(arg1:string):Promise<services.BlogDTO>;
 export function GetBlogs():Promise<Array<services.BlogDTO>>;
 
 export function GetCameras():Promise<Array<services.CameraDTO>>;
-
-export function GetTags():Promise<Array<string>>;
 
 export function GetComments(arg1:services.ListCommentsParams):Promise<services.PaginatedResponse_mo_gallery_desktop_services_CommentDTO_>;
 
@@ -266,6 +264,8 @@ export function GetStory(arg1:string):Promise<services.StoryDTO>;
 export function GetStoryAiModels():Promise<services.StoryAiModelsResponseDTO>;
 
 export function GetStoryAiProviderModels(arg1:string):Promise<services.StoryAiModelsResponseDTO>;
+
+export function GetTags():Promise<Array<string>>;
 
 export function GetZineAssetBlob(arg1:string):Promise<string>;
 
@@ -384,6 +384,8 @@ export function PreviewLocalLibraryFolderDeletion(arg1:string):Promise<local_lib
 export function ReadAgentSkill(arg1:string):Promise<agent_extensions.SkillContent>;
 
 export function ReadAgentSkillResource(arg1:string,arg2:string):Promise<agent_extensions.SkillResource>;
+
+export function ReanalyzeLocalAssetColors(arg1:string):Promise<Array<string>>;
 
 export function RebuildLocalLibraryThumbnails(arg1:string):Promise<number>;
 

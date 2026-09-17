@@ -938,6 +938,51 @@ func capOpenEndedMediaRange(r *http.Request, totalSize int64) {
 	r.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
 }
 
+// ReanalyzeAssetColors re-extracts the dominant-colour palette of a single
+// asset from its original file and stores the result. It mirrors the cloud
+// panel's "re-analyse" action, which exists because a palette extracted by an
+// older algorithm (or from a file edited outside the library) can be wrong
+// while still looking plausible.
+//
+// The original file is decoded rather than the cached thumbnail: the thumbnail
+// is already a downscaled crop, and re-using it would bake the previous
+// reduction into every subsequent palette. Returns the refreshed colours.
+func (m *Manager) ReanalyzeAssetColors(id AssetID) ([]string, error) {
+	session, err := m.requireAvailableSession()
+	if err != nil {
+		return nil, err
+	}
+	relative, mediaKind, availability, lookupErr := session.store.assetColorAnalysisSource(session.ctx, id)
+	if lookupErr != nil {
+		return nil, lookupErr
+	}
+	if availability != "active" {
+		return nil, newError(ErrAssetNotFound, "仅可分析当前可用的资产", map[string]any{"assetId": id})
+	}
+	// Only image-backed assets carry a palette; playable media and unsupported
+	// files would decode into noise.
+	if mediaKind != "image" && mediaKind != "live-photo" {
+		return nil, newError(ErrInvalidPath, "该资产不支持色彩分析", map[string]any{"assetId": id, "mediaKind": mediaKind})
+	}
+	source, resolveErr := resolveWithinRoot(session.root, relative)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+	image, decodeErr := decodeImage(source)
+	if decodeErr != nil {
+		return nil, newError(ErrInvalidLibrary, "图片解码失败，无法分析色彩", map[string]any{"assetId": id, "cause": decodeErr.Error()})
+	}
+	colors := extractDominantColors(image, 5)
+	if len(colors) == 0 {
+		return nil, newError(ErrInvalidLibrary, "未能从该图片提取到主色", map[string]any{"assetId": id})
+	}
+	if storeErr := session.store.setDominantColors(session.ctx, id, colors); storeErr != nil {
+		return nil, storeErr
+	}
+	m.emitEvent("asset_colors_reanalyzed")
+	return colors, nil
+}
+
 // RecheckMissingAssets verifies the original paths and restores the same asset records when files return.
 func (m *Manager) RecheckMissingAssets(ids []AssetID) ([]AssetMaintenanceResult, error) {
 	session, err := m.requireAvailableSession()

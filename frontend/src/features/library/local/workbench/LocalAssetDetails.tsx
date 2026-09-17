@@ -44,10 +44,12 @@ import {
   LibrarySavingHint,
 } from "@/components/ui/library";
 import { CloudIcon, CloudOffIcon } from "@/components/icons/CloudIcons";
+import { CameraParameters } from "@/components/CameraParameters";
 import { formatTimecode, isPhotoAsset, isPlayableAsset, isVideoAsset } from "../types";
 import type { LocalAsset, LocalAssetClip, LocalCollection, LocalTag } from "../types";
 import type { LocalLibraryCopy } from "../copy";
 import { useAssetClips, useClipExport } from "./useAssetClips";
+import { localLibraryApi } from "../api";
 
 interface Props {
   asset: LocalAsset | null;
@@ -81,6 +83,8 @@ interface Props {
   onUpload: (asset: LocalAsset) => void;
   /** 在播放器中播放资产的某个片段。 */
   onPlayClip?: (asset: LocalAsset, clip: LocalAssetClip) => void;
+  /** 主色重新分析完成后回写面板（避免整表刷新）。 */
+  onColorsUpdated?: (assetId: string, colors: string[]) => void;
 }
 
 import {
@@ -125,6 +129,7 @@ function LocalAssetDetailsContent({
   onSetCollections,
   onUpload,
   onPlayClip,
+  onColorsUpdated,
 }: Props) {
   const [title, setTitle] = useState(asset?.displayTitle || "");
   const [notes, setNotes] = useState(asset?.notes || "");
@@ -141,6 +146,8 @@ function LocalAssetDetailsContent({
   const [organizationOpen, setOrganizationOpen] = useState(true);
   const [shootingOpen, setShootingOpen] = useState(true);
   const [fileInfoOpen, setFileInfoOpen] = useState(true);
+  /* 「文件信息」是独立区块，需要自己的折叠状态（此前与拍摄区块共用一个开关）。 */
+  const [pathInfoOpen, setPathInfoOpen] = useState(true);
   const [notesOpen, setNotesOpen] = useState(false);
   const [cloudInfoOpen, setCloudInfoOpen] = useState(false);
   const [clipsOpen, setClipsOpen] = useState(true);
@@ -276,6 +283,42 @@ function LocalAssetDetailsContent({
     }
   };
 
+  /* 主色卡重分析：与云端信息栏同一套交互（按钮 + 图标旋转 + 结果回写）。 */
+  const [reanalyzing, setReanalyzing] = useState(false);
+  const [colorNotice, setColorNotice] = useState<
+    { tone: "ok" | "error"; text: string } | undefined
+  >(undefined);
+
+  const reanalyzeColors = async () => {
+    if (!asset || reanalyzing) return;
+    setReanalyzing(true);
+    setColorNotice(undefined);
+    try {
+      const colors = await localLibraryApi.reanalyzeAssetColors(asset.id);
+      onColorsUpdated?.(asset.id, colors);
+      setColorNotice({ tone: "ok", text: copy.reanalyzed });
+    } catch (error) {
+      setColorNotice({
+        tone: "error",
+        text:
+          error instanceof Error && error.message
+            ? error.message
+            : copy.reanalyzeFailed,
+      });
+    } finally {
+      setReanalyzing(false);
+    }
+  };
+
+  const copyColorValue = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setColorNotice({ tone: "ok", text: `${copy.colorCopied} ${value}` });
+    } catch {
+      /* 剪贴板不可用时静默失败 */
+    }
+  };
+
   if (!asset) {
     return (
       <LibraryDetailsEmpty
@@ -296,7 +339,8 @@ function LocalAssetDetailsContent({
   const cameraLabel = [exif?.cameraMake, exif?.cameraModel]
     .filter(Boolean)
     .join(" ");
-  /* 三列参数卡（参考稿 .kv2：焦距/光圈/快门），其余进下方 kv 行 */
+  /* 拍摄参数卡（复用云端同款 CameraParameters：焦距/光圈/快门/ISO）。
+     ISO 从原来的 kv 行移到这里，两侧参数集因此完全一致。 */
   const exposureCards = (
     [
       {
@@ -308,6 +352,7 @@ function LocalAssetDetailsContent({
         label: copy.filterExposure,
         value: formatExposure(exif?.shutterSeconds),
       },
+      { label: "ISO", value: exif?.iso ? `ISO ${exif.iso}` : null },
     ] as Array<{ label: string; value: string | null }>
   ).filter((parameter): parameter is { label: string; value: string } =>
     Boolean(parameter.value),
@@ -328,6 +373,52 @@ function LocalAssetDetailsContent({
     : assignedTags.slice(0, TAG_PREVIEW_COUNT);
   const hiddenTagCount = assignedTags.length - visibleTags.length;
   const hasCustomTitle = Boolean(title) && title !== asset.fileName;
+
+  /* ── 基本信息：尺寸 / 大小 / 时间 / 存储提供方，两列卡片网格（对齐云端） ── */
+  const basicInfoCards = (
+    [
+      {
+        key: "dimensions",
+        label: copy.dimensions,
+        value: dimensionLabel,
+        mono: true,
+      },
+      {
+        key: "size",
+        label: copy.fileSize,
+        value: asset.byteSize > 0 ? formatBytes(asset.byteSize) : null,
+      },
+      {
+        key: "captured",
+        label: copy.captured,
+        value: isPhoto && asset.capturedAt ? formatDate(asset.capturedAt) : null,
+      },
+      {
+        key: "modified",
+        label: copy.modified,
+        value: formatDate(asset.modifiedAtNs),
+      },
+      // 上传时间：仅已上传到云端的照片展示（与存储提供方同一显隐条件）。
+      {
+        key: "uploaded",
+        label: copy.uploadedAt,
+        value:
+          isPhoto && uploaded && asset.cloudLinkedAt
+            ? formatDate(asset.cloudLinkedAt)
+            : null,
+      },
+      {
+        key: "provider",
+        label: copy.provider,
+        value:
+          isPhoto && uploaded && asset.cloudStoragePluginId
+            ? asset.cloudStoragePluginId.toUpperCase()
+            : null,
+      },
+    ] as Array<{ key: string; label: string; value: string | null; mono?: boolean }>
+  ).filter((item): item is { key: string; label: string; value: string; mono?: boolean } =>
+    Boolean(item.value),
+  );
 
   /* ── 合并卡片第一段：预览图 + 异常状态提示 ── */
   const previewSegment = (
@@ -839,49 +930,112 @@ function LocalAssetDetailsContent({
           />
         ))}
 
-      {/* ── 文件信息（参考稿「基本信息」，kv 键值行布局） ── */}
+      {/* ── 基本信息：尺寸 / 大小 / 时间 / 存储提供方（两列卡片网格） ── */}
       <LibraryDetailsSection
-        label={copy.details}
-        icon={FileText}
+        label={copy.basicInfo}
+        icon={Info}
         open={fileInfoOpen}
         onToggle={() => setFileInfoOpen((v) => !v)}
       >
-        <LibraryKvList>
-          {dimensionLabel && (
-            <LibraryKvItem
-              label={copy.dimensions}
-              mono
-              value={
-                <>
-                  {dimensionLabel}
-                  {asset.width && asset.height ? (
-                    <span
-                      className="ml-1"
-                      style={{ color: "var(--muted-foreground)" }}
-                    >
-                      · {((asset.width * asset.height) / 1e6).toFixed(1)} MP
-                    </span>
-                  ) : null}
-                </>
+        <div className="grid grid-cols-2 gap-2">
+          {basicInfoCards.map((item) => (
+            <LibraryMetaRow
+              key={item.key}
+              card
+              label={item.label}
+              value={item.value}
+              mono={item.mono}
+            />
+          ))}
+        </div>
+      </LibraryDetailsSection>
+
+      {/* ── 照片信息：主色卡 + 拍摄参数；非照片资产不展示（视频/音频/其他文件） ── */}
+      {isPhoto && (
+        <LibraryDetailsSection
+          label={copy.details}
+          icon={Camera}
+          open={shootingOpen}
+          onToggle={() => setShootingOpen((v) => !v)}
+        >
+          {/* 主色卡：与云端同一套交互 —— 点色块复制色值 + 重新分析按钮 */}
+          {asset.dominantColors && asset.dominantColors.length > 0 && (
+            <LibraryFieldBlock
+              label={copy.dominantColors}
+              action={
+                <button
+                  type="button"
+                  disabled={reanalyzing || missing || trashed}
+                  onClick={() => void reanalyzeColors()}
+                  title={copy.reanalyzeColors}
+                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors hover:bg-secondary disabled:cursor-wait disabled:opacity-40"
+                  style={{ color: "var(--muted-foreground)" }}
+                >
+                  <RefreshCw
+                    size={10}
+                    className={reanalyzing ? "animate-spin" : ""}
+                  />
+                  {copy.reanalyzeColors}
+                </button>
               }
-            />
+            >
+              <LibraryColorStrip
+                colors={asset.dominantColors}
+                onSelect={(color) => void copyColorValue(color)}
+              />
+            </LibraryFieldBlock>
           )}
-          {asset.byteSize > 0 && (
-            <LibraryKvItem
-              label={copy.fileSize}
-              value={formatBytes(asset.byteSize)}
-            />
+          {colorNotice && (
+            <p
+              className="mt-1.5 text-[10px] leading-4"
+              style={{
+                color:
+                  colorNotice.tone === "ok" ? "var(--muted-foreground)" : "#B45309",
+              }}
+            >
+              {colorNotice.text}
+            </p>
           )}
-          {isPhoto && asset.capturedAt && (
-            <LibraryKvItem
-              label={copy.captured}
-              value={formatDate(asset.capturedAt)}
-            />
+
+          {/* 拍摄参数：复用云端同款组件（设备卡 + 参数网格） */}
+          {hasExif && (
+            <div
+              className={
+                asset.dominantColors && asset.dominantColors.length > 0
+                  ? "mt-3"
+                  : undefined
+              }
+            >
+              <CameraParameters
+                cameraLabel={copy.camera}
+                cameraValue={cameraLabel}
+                lensLabel={copy.lens}
+                lensValue={exif?.lensModel}
+                parameters={exposureCards}
+              />
+            </div>
           )}
-          <LibraryKvItem
-            label={copy.modified}
-            value={formatDate(asset.modifiedAtNs)}
-          />
+
+          {!hasExif &&
+            (!asset.dominantColors || asset.dominantColors.length === 0) && (
+              <p
+                className="text-[10px] italic"
+                style={{ color: "var(--muted-foreground)" }}
+              >
+                {copy.noPhotoInfo}
+              </p>
+            )}
+        </LibraryDetailsSection>
+      )}
+
+      {/* ── 文件信息：路径相关字段（格式 / 资源库路径） ── */}
+      <LibraryDetailsSection
+        label={copy.fileInfo}
+        icon={FileText}
+        open={pathInfoOpen}
+        onToggle={() => setPathInfoOpen((v) => !v)}
+      >
+        <LibraryKvList>
           <LibraryKvItem label={copy.format} value={asset.format.toUpperCase()} />
           <LibraryKvItem
             label={copy.originalPath}
@@ -903,53 +1057,7 @@ function LocalAssetDetailsContent({
             }
           />
         </LibraryKvList>
-
-        {/* 主色：放在区块末尾（与云端照片信息同一排布），有数据才显示 */}
-        {isPhoto && asset.dominantColors && asset.dominantColors.length > 0 && (
-          <LibraryFieldBlock label={copy.dominantColors} className="mt-2.5">
-            <LibraryColorStrip colors={asset.dominantColors} />
-          </LibraryFieldBlock>
-        )}
       </LibraryDetailsSection>
-
-      {/* ── 拍摄信息（参考稿「拍摄参数」：三列参数卡 + kv 行；有 EXIF 才显示） ── */}
-      {hasExif && (
-        <LibraryDetailsSection
-          label={copy.filterCamera}
-          icon={Camera}
-          open={shootingOpen}
-          onToggle={() => setShootingOpen((v) => !v)}
-        >
-          {exposureCards.length > 0 && (
-            <div className="grid grid-cols-3 gap-2">
-              {exposureCards.map((parameter) => (
-                <LibraryMetaRow
-                  key={`${parameter.label}-${parameter.value}`}
-                  card
-                  mono
-                  label={parameter.label}
-                  value={parameter.value}
-                />
-              ))}
-            </div>
-          )}
-          {(cameraLabel || exif?.lensModel || exif?.iso) && (
-            <LibraryKvList
-              className={exposureCards.length > 0 ? "mt-2.5" : undefined}
-            >
-              {cameraLabel && (
-                <LibraryKvItem label={copy.camera} value={cameraLabel} />
-              )}
-              {exif?.lensModel && (
-                <LibraryKvItem label={copy.lens} value={exif.lensModel} />
-              )}
-              {exif?.iso && (
-                <LibraryKvItem label="ISO" mono value={exif.iso} />
-              )}
-            </LibraryKvList>
-          )}
-        </LibraryDetailsSection>
-      )}
 
       {/* ── 标签与集合 ── */}
       <LibraryDetailsSection
