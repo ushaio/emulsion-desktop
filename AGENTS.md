@@ -7,7 +7,7 @@ Go 1.25 + Wails v2.14 桌面应用，前端在 `frontend/`（React 19 + Vite 6 +
 - `frontend/` — Wails 前端（`pnpm --filter mo-gallery-desktop-frontend dev`）
 - `services/` — Go 服务层（auth、photo、upload、zine、editor-ai 代理、official_auth、updater、usage 等）
 - `storage_plugins/` — 插件宿主（市场解析 `marketplace.go` 为 index.json 的权威实现、签名校验、Node 运行时）
-- `packages/desktop-plugin-sdk` — 插件 TS SDK（JSON-RPC over stdio）
+- `packages/plugin-sdk` — 插件 TS SDK（JSON-RPC over stdio）
 - `packages/emulsion-mcp` — 编辑器 MCP server
 - `agent_extensions/` — 编辑器 AI 的 MCP/Skill 运行时
 - `db/`、`config/`、`local_library/`、`types/`、`storage/` — 数据与基础设施
@@ -18,9 +18,9 @@ Go 1.25 + Wails v2.14 桌面应用，前端在 `frontend/`（React 19 + Vite 6 +
 
 ## 跨仓库联动（重要）
 
-- `frontend/package.json` 中 `@mo-gallery/*` 来自 mo-gallery-shared 的 **git tag 依赖**，禁止改 `file:`/`link:`；共享编辑器/AI 逻辑去 shared 包改，不要在本仓库复制。
+- 根目录 `packages/*` 下的 `@mo-gallery/*` 是 `../mo-gallery-shared` 的 **workspace 副本**（本仓库 pnpm workspace 成员，以 `workspace:*` 引用），源在 shared；在 shared 仓库运行 `pnpm sync` 同步到这里的 `packages/*`。不要直接编辑本仓库的镜像文件（有漂移检测），也不要把共享编辑器/AI 逻辑复制进本仓库。根 `package.json` 的 `react`/`react-dom`/`lucide-react` devDependencies 是给这些 workspace 包提供 `peerDependencies` 的。另外 `packages/plugin-sdk`（插件 TS SDK）与 `packages/emulsion-mcp` 是本仓库**专有**包，不属于共享包——不要把它们挪进 `mo-gallery-shared`，也不参与 `pnpm sync` 同步。
 - 调用官网（mo-gallery-offical）API：`services/official_auth.go`（/api/auth/*）、`services/usage.go`（/api/desktop/usage）、`frontend/src/lib/zine/plaza.ts` 与 `lib/official-ai.ts`（/api/templates*、/api/ai/catalog）。改官网接口时需同步这里。
-- 改 `packages/desktop-plugin-sdk` 或 `storage_plugins/marketplace.go` 时，检查 `../plugins/` 下三个插件与 `../mo-gallery-plugin/index.json`。
+- 改 `packages/plugin-sdk` 或 `storage_plugins/marketplace.go` 时，检查 `../plugins/` 下三个插件与 `../mo-gallery-plugin/index.json`。
 
 ## 注意
 

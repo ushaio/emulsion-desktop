@@ -2,8 +2,10 @@ packages:
   - frontend
   - packages/*
 
-# @mo-gallery/* 来自 mo-gallery-shared 的 git 依赖，且包之间存在同仓库 git 互联引用
-blockExoticSubdeps: false
+# @mo-gallery/* 是本仓库 packages/* 下的 workspace 成员：源在 ../mo-gallery-shared，
+# 由该仓库的 pnpm sync 单向同步过来，这里不要直接编辑镜像文件。
+# 根 package.json 里的 react / react-dom / lucide-react 只用于满足这些包的
+# peerDependencies（pnpm 从工作区根解析成员包的 peer），实际打包仍用 frontend 的依赖。
 
 allowBuilds:
   esbuild: true
