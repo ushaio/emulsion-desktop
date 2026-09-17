@@ -937,14 +937,14 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
     }
   }
 
-  const copyAssetToClipboard = useCallback(async (asset: LocalAsset, cut: boolean) => {
+  const copyAssetToClipboard = useCallback(async (asset: LocalAsset) => {
     try {
-      await localLibraryApi.copyAssetsToClipboard([asset.id], cut)
-      toast.success(cut ? copy.cutToClipboard : copy.copiedToClipboard)
+      await localLibraryApi.copyAssetsToClipboard([asset.id])
+      toast.success(copy.copiedToClipboard)
     } catch (error) {
       toast.error(parseLocalLibraryError(error).message)
     }
-  }, [copy.copiedToClipboard, copy.cutToClipboard])
+  }, [copy.copiedToClipboard])
 
   const uploadAsset = useCallback((asset: LocalAsset) => {
     if (!isAuthenticated || asset.availability !== 'active' || !isPhotoAsset(asset)) return

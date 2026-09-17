@@ -459,7 +459,7 @@ export const localLibraryApi = {
     RestoreLocalLibraryFolder(trashId, destinationParent, topLevelName),
   permanentlyDeleteFolder: (trashId: string) => PermanentDeleteLocalLibraryFolder(trashId),
   originalPaths: (ids: string[]) => GetLocalAssetOriginalPaths(ids) as Promise<string[]>,
-  copyAssetsToClipboard: (ids: string[], cut: boolean) => CopyLocalAssetsToClipboard(ids, cut),
+  copyAssetsToClipboard: (ids: string[]) => CopyLocalAssetsToClipboard(ids, false),
   startScan: () => StartLocalLibraryScan(),
   pauseScan: () => PauseLocalLibraryScan(),
   resumeScan: () => ResumeLocalLibraryScan(),

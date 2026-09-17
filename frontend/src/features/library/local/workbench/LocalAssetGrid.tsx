@@ -50,7 +50,7 @@ interface Props {
   onOpen: (asset: LocalAsset) => void
   onOpenFolder: (folder: FolderItem) => void
   onOpenInFileManager: (asset: LocalAsset) => void
-  onClipboard: (asset: LocalAsset, cut: boolean) => void
+  onClipboard: (asset: LocalAsset) => void
   onUpload: (asset: LocalAsset) => void
   onUploadSettings: (asset: LocalAsset) => void
   onUploadToStorage: (asset: LocalAsset, storageSourceId: string) => void
@@ -78,7 +78,7 @@ export interface AssetCardProps {
   onSelect: (asset: LocalAsset, intent?: { toggle?: boolean, range?: boolean }) => void
   onOpen: (asset: LocalAsset) => void
   onOpenInFileManager: (asset: LocalAsset) => void
-  onClipboard: (asset: LocalAsset, cut: boolean) => void
+  onClipboard: (asset: LocalAsset) => void
   onUpload: (asset: LocalAsset) => void
   onUploadSettings: (asset: LocalAsset) => void
   onUploadToStorage: (asset: LocalAsset, storageSourceId: string) => void
@@ -237,8 +237,7 @@ const AssetCard = memo(function AssetCard({
           </>
         ) : (
           <>
-            <ContextMenuItem onSelect={() => onClipboard(asset, true)}><Scissors size={14} />{copy.cut}</ContextMenuItem>
-            <ContextMenuItem onSelect={() => onClipboard(asset, false)}><Copy size={14} />{copy.copyAsset}</ContextMenuItem>
+            <ContextMenuItem onSelect={() => onClipboard(asset)}><Copy size={14} />{copy.copyAsset}</ContextMenuItem>
             <ContextMenuItem onSelect={() => onOpenInFileManager(asset)}><FolderSearch2 size={14} />{copy.openInFileManager}</ContextMenuItem>
             <ContextMenuItem onSelect={() => onRename(asset)}><FilePenLine size={14} />{copy.renameAsset}</ContextMenuItem>
             <ContextMenuItem onSelect={() => onMove(asset)}><FolderInput size={14} />{copy.moveAssetsToFolder}</ContextMenuItem>
