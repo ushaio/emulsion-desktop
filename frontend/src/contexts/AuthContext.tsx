@@ -9,7 +9,7 @@ import {
   isAuthError,
 } from '@/lib/auth-errors'
 import type { UserInfo } from '@/types'
-import { ClearAuth, GetApiConfig, SetAuth } from '../../wailsjs/go/main/App'
+import { GetApiConfig, SetAuth } from '../../wailsjs/go/main/App'
 import { configuredLoginUrl, type SavedAuthConfig } from '@/lib/auth-config'
 
 interface AuthContextType {
@@ -103,11 +103,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const wrapped: WailsFunction = (...args: unknown[]) => {
           const suppressAuthFailure = authSyncPendingRef.current
+          // 断开站点是本地会话的主动终止，Go 端清除 token 后随后的业务请求
+          // 必然返回 401；这些 401 属于预期噪音，不应再触发一次「登录已失效」
+          // 的清退跳转。
+          const suppressDisconnectNoise = key === 'DisconnectSite'
           const result = currentFn.apply(app, args)
           if (!result || typeof (result as Promise<unknown>).catch !== 'function') return result
           return (result as Promise<unknown>)
             .then((value) => {
-              if (active) invalidateDesktopCacheForMutation(key)
+              if (active && !suppressDisconnectNoise) invalidateDesktopCacheForMutation(key)
               return value
             })
             .catch((error: unknown) => {
@@ -252,7 +256,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     authSyncPendingRef.current = false
-    void ClearAuth().catch(() => undefined)
     clearAuthState()
   }, [clearAuthState])
 

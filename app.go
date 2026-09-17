@@ -418,16 +418,15 @@ func (a *App) ClearAuth() {
 	a.setAuthenticatedUser("")
 }
 
-// DisconnectSite 清除 web 站点连接配置与本地会话，恢复"未连接站点"状态。
+// DisconnectSite 清除 web 站点的本地会话，恢复"未连接站点"状态。
+//
+// 仅清除运行时会话（内存 token 与前端登录态），连接地址与"记住登录"保存的
+// 凭据一律保留：断开连接是回退到本地模式，不是登出账号，重新连接时仍需
+// 沿用上次的服务器地址与账号密码。要彻底清除凭据请在设置页关闭"记住登录"，
+// 或修改设置页的站点连接地址。
 func (a *App) DisconnectSite() error {
 	a.Proxy.SetToken("")
 	a.setAuthenticatedUser("")
-	a.cfg.API.BaseURL = ""
-	a.cfg.API.LoginURL = ""
-	a.cfg.API.RememberLogin = false
-	a.cfg.API.SavedUsername = ""
-	a.cfg.API.SavedPassword = ""
-	a.cfg.Save("")
 	a.Logger.Info(services.LogCategoryAuth, "site_disconnected", "已断开站点连接", "")
 	return nil
 }
