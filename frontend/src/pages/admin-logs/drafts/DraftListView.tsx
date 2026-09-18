@@ -33,9 +33,12 @@ import { resolveAssetUrl } from '@/lib/api/core'
 import { getStoryCoverImageStyle } from '@/lib/story-cover'
 import type { BlogDraftData, StoryDraftData, StoryEditorDraftData } from '@/lib/client-db'
 
-/** 叙事上传草稿（含待上传图片的本地预览 URL） */
+/**
+ * 叙事上传草稿（含待上传图片的本地预览 URL）。
+ * `file` 可缺：本地资源库来源的待传项没有字节（上传时由 Go 按 assetId 读盘）。
+ */
 export interface LocalStoryDraft extends Omit<StoryDraftData, 'files'> {
-  files: { id: string; file: File; preview: string }[]
+  files: { id: string; file?: File; preview: string }[]
 }
 
 type LocalDraftSortKey = 'savedAt' | 'title'

@@ -26,6 +26,8 @@ interface StoryEditorViewProps {
   editorRevision?: number
   pendingImages: PendingImage[]
   pendingCoverId: string | null
+  /** 待传项 id → 本地预览图（会话级，仅供占位卡渲染回显，不进文档） */
+  pendingPreviews?: Map<string, string>
   saving: boolean
   draftSaved: boolean
   lastSavedAt: number | null
@@ -93,6 +95,7 @@ export function StoryEditorView({
   editorRevision,
   pendingImages,
   pendingCoverId,
+  pendingPreviews,
   saving,
   draftSaved,
   lastSavedAt,
@@ -233,6 +236,7 @@ export function StoryEditorView({
                 token={token}
                 photos={currentStory.photos}
                 cdnDomain={settingsCdnDomain}
+                pendingPreviews={pendingPreviews}
                 onPhotoUploaded={(photo) => setCurrentStory((prev) => prev?.id === currentStory.id && !prev.photos.some((entry) => entry.id === photo.id) ? { ...prev, photos: [...prev.photos, photo] } : prev)}
                 onPasteFiles={onPasteFiles}
                 toolbarAction={{

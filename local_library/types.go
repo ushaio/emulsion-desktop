@@ -350,6 +350,9 @@ type ClipExportProgress struct {
 type AssetQuery struct {
 	Cursor           string   `json:"cursor,omitempty"`
 	Limit            int      `json:"limit,omitempty"`
+	// IDs 直接按资产标识取行（编辑器的素材库待传项在草稿里只留 assetId，
+	// 恢复时靠它换回新鲜的原图路径与缩略图 URL）。与其他条件一样是「且」关系。
+	IDs              []string `json:"ids,omitempty"`
 	Folder           string   `json:"folder,omitempty"`
 	DirectFolderOnly bool     `json:"directFolderOnly,omitempty"`
 	Search           string   `json:"search,omitempty"`

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { DatabaseBackup, Loader2, RotateCcw, X } from 'lucide-react'
+import { DatabaseBackup, Loader2, RotateCcw, Trash2, X } from 'lucide-react'
 import { formatBytes } from '@/lib/utils'
 import type { BackupInfo, BackupOverview } from '../types'
 import type { LocalLibraryCopy } from '../copy'
@@ -9,10 +9,11 @@ interface Props {
   copy: LocalLibraryCopy
   overview?: BackupOverview
   loading: boolean
-  operation: 'create' | 'restore' | null
+  operation: 'create' | 'restore' | 'delete' | null
   onClose: () => void
-  onCreate: () => Promise<void>
+  onCreate: () => Promise<boolean>
   onRestore: (id: string) => Promise<boolean>
+  onDelete: (id: string) => Promise<boolean>
 }
 
 function backupKindLabel(kind: string, copy: LocalLibraryCopy) {
@@ -22,14 +23,30 @@ function backupKindLabel(kind: string, copy: LocalLibraryCopy) {
   return copy.backupKindManual
 }
 
-export function LocalLibraryBackupDialog({ copy, overview, loading, operation, onClose, onCreate, onRestore }: Props) {
+function backupMetaLine(backup: BackupInfo, copy: LocalLibraryCopy) {
+  return [
+    backup.appVersion ? `v${backup.appVersion}` : '',
+    backup.schemaVersion ? `${copy.backupMetaSchema} ${backup.schemaVersion}` : '',
+    backup.assetCount ? copy.backupMetaAssets.replace('{count}', backup.assetCount.toLocaleString()) : '',
+  ].filter(Boolean).join(' · ')
+}
+
+export function LocalLibraryBackupDialog({ copy, overview, loading, operation, onClose, onCreate, onRestore, onDelete }: Props) {
   const [restoreTarget, setRestoreTarget] = useState<BackupInfo>()
+  const [deleteTarget, setDeleteTarget] = useState<BackupInfo>()
   const busy = operation !== null
 
   const restore = async () => {
     if (!restoreTarget) return
     if (await onRestore(restoreTarget.id)) {
       setRestoreTarget(undefined)
+    }
+  }
+
+  const remove = async () => {
+    if (!deleteTarget) return
+    if (await onDelete(deleteTarget.id)) {
+      setDeleteTarget(undefined)
     }
   }
 
@@ -46,21 +63,28 @@ export function LocalLibraryBackupDialog({ copy, overview, loading, operation, o
           <button type="button" aria-label={copy.cancelAction} disabled={busy} onClick={onClose} className="rounded-md p-1.5 hover:bg-secondary disabled:opacity-50"><X size={15} /></button>
         </div>
 
-        <div className="border-b px-5 py-3 text-[11px] text-muted-foreground">{copy.backupScopeHint}</div>
         <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-5">
           {loading ? (
             <div className="flex h-36 items-center justify-center gap-2 text-xs text-muted-foreground"><Loader2 size={14} className="animate-spin" />{copy.loading}</div>
           ) : overview?.backups.length ? (
             <div className="space-y-2">
-              {overview.backups.map((backup) => (
+              {overview.backups.map((backup) => {
+                const metaLine = backupMetaLine(backup, copy)
+                return (
                 <div key={backup.id} className="flex items-center gap-3 rounded-lg border p-3">
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-medium">{backupKindLabel(backup.kind, copy)}</div>
                     <div className="mt-1 text-[10px] text-muted-foreground">{new Date(backup.createdAt).toLocaleString()} · {formatBytes(backup.sizeBytes)}</div>
+                    {metaLine && <div className="mt-0.5 text-[10px] text-muted-foreground">{metaLine}</div>}
+                    {backup.note && <div className="mt-1 truncate text-[11px]" title={backup.note}>{backup.note}</div>}
                   </div>
-                  <button type="button" disabled={busy} onClick={() => setRestoreTarget(backup)} className="flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[10px] hover:bg-secondary disabled:opacity-50"><RotateCcw size={11} />{copy.restoreBackup}</button>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button type="button" disabled={busy} onClick={() => { setRestoreTarget(backup); setDeleteTarget(undefined) }} className="flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[10px] hover:bg-secondary disabled:opacity-50"><RotateCcw size={11} />{copy.restoreBackup}</button>
+                    <button type="button" aria-label={copy.backupDelete} disabled={busy} onClick={() => { setDeleteTarget(backup); setRestoreTarget(undefined) }} className="flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[10px] text-muted-foreground transition hover:border-destructive hover:text-destructive disabled:opacity-50" title={copy.backupDelete}><Trash2 size={11} /></button>
+                  </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           ) : (
             <div className="flex h-36 items-center justify-center text-xs text-muted-foreground">{copy.noBackups}</div>
@@ -85,6 +109,22 @@ export function LocalLibraryBackupDialog({ copy, overview, loading, operation, o
               <button type="button" disabled={busy} onClick={() => setRestoreTarget(undefined)} className="rounded-md border px-3 py-2 text-xs hover:bg-secondary disabled:opacity-50">{copy.cancelAction}</button>
               <button type="button" disabled={busy} onClick={() => void restore()} className="flex items-center gap-2 rounded-md bg-destructive px-3 py-2 text-xs text-destructive-foreground disabled:opacity-60">
                 {operation === 'restore' && <Loader2 size={13} className="animate-spin" />}{operation === 'restore' ? copy.restoringBackup : copy.restoreBackup}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {deleteTarget && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center p-5">
+          <div className="absolute inset-0 bg-black/35" />
+          <div role="alertdialog" aria-modal="true" aria-labelledby="local-library-delete-backup-title" className="relative w-full max-w-md rounded-xl border bg-background p-5 shadow-2xl">
+            <h3 id="local-library-delete-backup-title" className="font-sans text-sm font-semibold">{copy.backupDeleteTitle}</h3>
+            <p className="mt-3 text-xs leading-5 text-muted-foreground">{copy.backupDeleteBody}</p>
+            <p className="mt-2 truncate text-[11px] text-muted-foreground">{backupKindLabel(deleteTarget.kind, copy)} · {new Date(deleteTarget.createdAt).toLocaleString()}</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" disabled={busy} onClick={() => setDeleteTarget(undefined)} className="rounded-md border px-3 py-2 text-xs hover:bg-secondary disabled:opacity-50">{copy.cancelAction}</button>
+              <button type="button" disabled={busy} onClick={() => void remove()} className="flex items-center gap-2 rounded-md bg-destructive px-3 py-2 text-xs text-destructive-foreground disabled:opacity-60">
+                {operation === 'delete' && <Loader2 size={13} className="animate-spin" />}{operation === 'delete' ? copy.backupDeleting : copy.backupDelete}
               </button>
             </div>
           </div>

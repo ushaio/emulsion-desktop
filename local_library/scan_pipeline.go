@@ -137,7 +137,23 @@ func classifyScanEntries(entries []scanFileEntry, snapshot map[string]assetIndex
 	for _, entry := range entries {
 		seen[entry.PathKey] = struct{}{}
 		existing, ok := snapshot[entry.PathKey]
-		if !ok || existing.ByteSize != entry.Size || existing.ModifiedAtNS != entry.ModNS || existing.Availability != "active" {
+		// media_kind and the dimensions are denormalised from the file, and this
+		// diff is what keeps them that way: once size and mtime agree, nothing
+		// ever inspects the file again. Two shapes of stale row reach here.
+		//
+		//   - media_kind='file' for an extension the library reads now, i.e. a
+		//     format whose decoder arrived after this library was indexed;
+		//   - media_kind='image' with no width, which is what the reclassify
+		//     migrations (M015-M017) leave behind: they can correct the kind in
+		//     SQL, but only a re-inspect can measure the file.
+		//
+		// Neither can match twice. A successful inspect records a width; a
+		// failed one records preview_status='unavailable'; and the kind is
+		// rewritten to a value the first rule rejects.
+		staleMediaKind := ok && existing.MediaKind == "file" && isSupportedMedia(entry.Absolute)
+		unmeasuredImage := ok && existing.Width <= 0 && existing.PreviewStatus != "unavailable" &&
+			(existing.MediaKind == "image" || existing.MediaKind == "live-photo")
+		if !ok || staleMediaKind || unmeasuredImage || existing.ByteSize != entry.Size || existing.ModifiedAtNS != entry.ModNS || existing.Availability != "active" {
 			classification.Changed = append(classification.Changed, entry)
 			continue
 		}

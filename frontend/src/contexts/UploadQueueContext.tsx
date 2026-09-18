@@ -13,6 +13,16 @@ type UploadExifData = Omit<image.ExifData, 'convertValues'>
 
 export type UploadTaskStatus = 'pending' | 'checking' | 'syncing' | 'compressing' | 'uploading' | 'completed' | 'failed'
 
+/**
+ * 队列内哈希/EXIF 表的键：本地资源库项优先用 assetId（Go 侧按 assetId 读盘，
+ * 草稿恢复出来的项可能还没补上 filePath），其余用文件路径。
+ * 与 uploadSingleFile 里选 UploadLocalAsset / UploadFile 的口径保持一致，
+ * 否则多个缺路径的项会全部落在空串这一个键上互相覆盖。
+ */
+function taskSourceKey(task: Pick<UploadTask, 'assetId' | 'filePath'>): string {
+  return task.assetId || task.filePath
+}
+
 export interface UploadTask {
   id: string
   filePath: string
@@ -39,9 +49,16 @@ interface UploadQueueContextType {
   retryAllFailed: () => void
   removeTask: (taskId: string) => void
   clearCompleted: () => void
+  /**
+   * 读取队列的实时权威状态（tasksRef），而非渲染用的 tasks state。
+   * 调用方在异步流程里需要「当前」进度时（例如等待本批任务终态后再插入 Markdown）
+   * 必须用这个：闭包捕获的 tasks 会停留在派发那一刻，永远看不到后续状态迁移。
+   */
+  getTasks: () => UploadTask[]
 }
 
-interface UploadSettings {
+/** 队列内的上传设置形状（编辑器的「待传素材」经 toQueueSettings 换算成它）。 */
+export interface UploadSettings {
   title: string
   tags: string[]
   albumIds?: string[]
@@ -127,7 +144,7 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
   }, [updateTask])
 
   const uploadSingleFile = useCallback(async (task: UploadTask, settings: UploadSettings) => {
-    const hash = hashesRef.current.get(task.filePath) || ''
+    const hash = hashesRef.current.get(taskSourceKey(task)) || ''
     try {
       if (task.checkDuplicate && hash) {
         updateTask(task.id, { status: 'checking', progress: 0, error: undefined })
@@ -184,7 +201,7 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
       }))
     }, 500)
     try {
-      const exif = new image.ExifData(exifsRef.current.get(task.filePath) || {})
+      const exif = new image.ExifData(exifsRef.current.get(taskSourceKey(task)) || {})
       const uploadMethod = task.assetId ? UploadLocalAsset : UploadFile
       const source = task.assetId || task.filePath
       const result = await uploadMethod(
@@ -305,8 +322,9 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
 
   const addTasks = useCallback((files: Array<{ filePath: string; assetId?: string; fileName: string; fileSize: number; hash: string; exif?: UploadExifData; checkDuplicate?: boolean }>, settings: UploadSettings) => {
     const newTasks: UploadTask[] = files.map(f => {
-      hashesRef.current.set(f.filePath, f.hash)
-      if (f.exif) exifsRef.current.set(f.filePath, f.exif)
+      const sourceKey = f.assetId || f.filePath
+      hashesRef.current.set(sourceKey, f.hash)
+      if (f.exif) exifsRef.current.set(sourceKey, f.exif)
       const task: UploadTask = {
         id: crypto.randomUUID(),
         filePath: f.filePath,
@@ -357,8 +375,10 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
     }))
   }, [patchTasks])
 
+  const getTasks = useCallback(() => tasksRef.current, [])
+
   return (
-    <UploadQueueContext.Provider value={{ tasks, isUploading, addTasks, retryTask, retryAllFailed, removeTask, clearCompleted }}>
+    <UploadQueueContext.Provider value={{ tasks, isUploading, addTasks, retryTask, retryAllFailed, removeTask, clearCompleted, getTasks }}>
       {children}
     </UploadQueueContext.Provider>
   )

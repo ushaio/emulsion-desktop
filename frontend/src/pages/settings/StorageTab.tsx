@@ -76,6 +76,8 @@ interface StorageSource {
   runtime?: string
   pluginId?: string
   local?: boolean
+  /** False when the source outlived its plugin (uninstalling keeps sources). */
+  pluginInstalled?: boolean
   enabled?: boolean
   status?: string
   lastError?: string
@@ -209,6 +211,10 @@ function supportsStorage(plugin: PluginDescriptor) {
 }
 
 function sourceStatus(source: StorageSource) {
+  // Checked before `enabled`: a missing plugin is the blocking condition and
+  // explains why the source no longer appears in storage maintenance, whereas
+  // "已停用" is a state the user chose deliberately.
+  if (source.pluginInstalled === false) return { label: '插件未安装', tone: 'error' as const }
   if (source.enabled === false) return { label: '已停用', tone: 'muted' as const }
   if (source.lastError || source.status === 'error' || source.status === 'failed') return { label: '连接异常', tone: 'error' as const }
   if (source.status === 'ready' || source.status === 'healthy' || source.status === 'active') return { label: '运行正常', tone: 'success' as const }

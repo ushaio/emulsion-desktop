@@ -104,11 +104,6 @@ export function MediaPlayerFrame({
   const viewSpan = Math.max(1, viewEnd - viewStart)
 
   useEffect(() => {
-    document.body.classList.add('mo-fullscreen-preview')
-    return () => document.body.classList.remove('mo-fullscreen-preview')
-  }, [])
-
-  useEffect(() => {
     onClipsChanged?.(clips)
   }, [clips, onClipsChanged])
 
@@ -499,7 +494,7 @@ export function MediaPlayerFrame({
   }
 
   return (
-    <div className="fixed inset-0 z-[70] flex flex-col bg-black/95 text-white" role="dialog" aria-modal="true" aria-label={title}>
+    <div className="fixed inset-x-0 bottom-0 top-9 z-[70] flex flex-col bg-black/95 text-white" role="dialog" aria-modal="true" aria-label={title}>
       <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4">
         <div className="flex min-w-0 items-center gap-2.5">
           {isAudio ? <Music size={16} className="shrink-0 text-white/60" /> : <Film size={16} className="shrink-0 text-white/60" />}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -18,6 +18,7 @@ import {
   Loader2,
   RefreshCw,
   Search,
+  Server,
   Trash2,
   X,
   XCircle,
@@ -57,10 +58,15 @@ function folderOf(key: string): string {
   return lastSlash >= 0 ? key.substring(0, lastSlash) : '/'
 }
 
+// 三种「缺失」状态：记录存在、但存储里没有文件。按缺失范围区分——
+// 原图与缩略图均缺失 / 仅缺失原图 / 仅缺失缩略图。这套口径与服务器端
+// /admin/storage/scan 完全一致，因此两个后端的状态筛选行为相同。
+const MISSING_STATUSES = new Set(['missing', 'missing_original', 'missing_thumbnail'])
+
 // 缺失对象在源上已不存在，没有可展示的地址；只有源上真实存在的图片才能预览。
 function canPreview(file: Pick<services.StorageObjectDTO, 'key' | 'url' | 'status'>): boolean {
   if (!isImageFile(file.key) || !file.url) return false
-  return file.status !== 'missing_original' && file.status !== 'missing_thumbnail'
+  return !MISSING_STATUSES.has(file.status)
 }
 
 // ── 持久化（与照片库/胶卷一致：localStorage + mo-gallery 前缀）──
@@ -203,11 +209,25 @@ function defaultExpandedFolders(nodes: FolderTreeNode[]): Set<string> {
 
 // ── 元数据 ───────────────────────────────────────────────────
 
+/**
+ * Which backend serves a source — the page administers two worlds and routes
+ * every operation by this value.
+ *
+ * 'web'    — the source lives on the server (local / s3 / github). Objects and
+ *            photo records both belong to the server, so every call is a proxy
+ *            round-trip and needs a connection.
+ * 'plugin' — a Desktop storage plugin source. Reconciled locally against the
+ *            local library, and works offline.
+ */
+type ProviderKind = 'web' | 'plugin'
+
 interface ProviderOption {
   value: string
-  label: string
+  label?: string
+  labelKey?: string
   icon: LucideIcon
-  /** Concrete storage product, used as a secondary label and for the icon. */
+  kind: ProviderKind
+  /** Concrete storage product; only Desktop plugin sources carry one. */
   vendor?: string
   vendorLabel?: string
 }
@@ -223,6 +243,7 @@ const VENDOR_LABELS: Record<string, string> = {
   'aws-s3': 'AWS S3',
   minio: 'MinIO',
   github: 'GitHub',
+  webdav: 'WebDAV',
   local: '本地',
 }
 
@@ -231,10 +252,18 @@ function vendorLabel(vendor?: string): string {
   return VENDOR_LABELS[vendor] ?? vendor
 }
 
-// Desktop storage sources come from the installed storage plugins, so the
-// provider list is derived from SourceDTO rather than the legacy web
-// local/s3/github enum. Only enabled sources can be scanned: a disabled plugin
-// has no runtime to list objects with.
+// Server-side storage sources. A fixed enum configured on the server rather
+// than fetched, matching the web admin's own provider list. They come FIRST so
+// the tab order stays "server, then this machine".
+const WEB_PROVIDERS: ProviderOption[] = [
+  { value: 'local', labelKey: 'admin.storage_provider_local', icon: HardDrive, kind: 'web' },
+  { value: 's3', label: 'S3', icon: Cloud, kind: 'web' },
+  { value: 'github', labelKey: 'admin.storage_provider_github', icon: Github, kind: 'web' },
+]
+
+// Desktop storage sources come from the installed storage plugins, so they are
+// derived from SourceDTO rather than the legacy web enum. Only enabled sources
+// can be scanned: a disabled plugin has no runtime to list objects with.
 //
 // The icon keys off vendor first: several providers share the s3-compatible
 // plugin, and "which product is this?" is the more useful distinction than
@@ -242,20 +271,31 @@ function vendorLabel(vendor?: string): string {
 function sourceIcon(pluginId: string, vendor?: string): LucideIcon {
   const key = (vendor || pluginId).toLowerCase()
   if (key.includes('github')) return Github
-  if (key.includes('webdav') || key.includes('local') || key === 'local' || key.includes('fs')) return HardDrive
+  if (key.includes('webdav') || key.includes('minio') || key.includes('local') || key === 'local' || key.includes('fs')) return HardDrive
   return Cloud
 }
 
+// getProviders builds the source tabs: server sources first, plugin sources
+// after.
+//
+// Only `enabled` is filtered for plugins: the backend's
+// GetDesktopStorageSources already excludes sources whose plugin is not
+// installed, because those cannot list objects and would render a tab that can
+// only ever error. Filtering again on `pluginInstalled` would hide a backend
+// regression instead of surfacing it, so this trusts the binding's contract
+// deliberately.
 function getProviders(sources: storage_plugins.SourceDTO[]): ProviderOption[] {
-  return sources
+  const pluginSources: ProviderOption[] = sources
     .filter(source => source.enabled)
     .map(source => ({
       value: source.id,
       label: source.name || source.pluginId || source.id,
       icon: sourceIcon(source.pluginId ?? '', source.vendor),
+      kind: 'plugin' as const,
       vendor: source.vendor,
       vendorLabel: vendorLabel(source.vendor),
     }))
+  return [...WEB_PROVIDERS, ...pluginSources]
 }
 
 interface StatusMeta {
@@ -378,6 +418,29 @@ function StorageCleanupPage() {
   const [generatingThumb, setGeneratingThumb] = useState<Set<string>>(new Set())
   const [sections, setSections] = useState<StorageSections>(readSections)
   const [expandedFolders, setExpandedFolders] = useState<Set<string> | null>(readExpandedFolders)
+  // 正在浏览哪个分组的源列表（null = 收起）。注意它**不等于**当前生效的分组：
+  // 点 DESKTOP 只是打开它的列表，选中的源变了才算切过去。
+  const [menuKind, setMenuKind] = useState<ProviderKind | null>(null)
+  const groupStackRef = useRef<HTMLDivElement | null>(null)
+
+  // 点击面板外 / Esc 收起。收起不改变当前存储源——没选就等于没切。
+  useEffect(() => {
+    if (menuKind === null) return
+    const handleMouseDown = (event: MouseEvent) => {
+      if (groupStackRef.current && !groupStackRef.current.contains(event.target as Node)) {
+        setMenuKind(null)
+      }
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuKind(null)
+    }
+    document.addEventListener('mousedown', handleMouseDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [menuKind])
 
   const toggleSection = (key: keyof StorageSections) => {
     setSections(prev => {
@@ -388,6 +451,54 @@ function StorageCleanupPage() {
   }
 
   // ── 数据加载 ─────────────────────────────────────────────
+
+  const providers = useMemo(() => getProviders(storageSources), [storageSources])
+
+  // 当前选中源属于哪个后端。表格同时展示两个存储世界，所有操作都要按它路由。
+  // 未选中任何源时回落到首个源所在的分组（校正 effect 随后会把它选中），
+  // 这样分组 tab 的高亮与下拉内容从一开始就一致。
+  const activeProvider = useMemo(
+    () => providers.find(p => p.value === provider),
+    [providers, provider],
+  )
+  const activeKind: ProviderKind = activeProvider?.kind ?? providers[0]?.kind ?? 'web'
+
+  // 源名的显示文案：服务器源走 i18n（要跟随语言切换），插件源用自身名字。
+  const providerLabelOf = useCallback(
+    (item: ProviderOption) => (item.labelKey ? t(item.labelKey, language) : (item.label || item.value)),
+    [language],
+  )
+
+  // 展开面板里的候选源：按**正在浏览的分组**过滤（可能与当前生效分组不同，
+  // 因为点击 tab 尚未提交），不与另一组混合。
+  const providerOptions = useMemo(
+    () => providers
+      .filter(item => item.kind === menuKind)
+      .map(item => ({ value: item.value, label: providerLabelOf(item) })),
+    [providers, menuKind, providerLabelOf],
+  )
+
+  const activeSourceLabel = activeProvider ? providerLabelOf(activeProvider) : ''
+  // 标题前缀：标明当前源属于哪个分组。tab 标签只写分组名，源名要靠这里限定。
+  const activeKindLabel = t(
+    activeKind === 'web' ? 'admin.storage_group_web' : 'admin.storage_group_desktop',
+    language,
+  )
+
+  // 分组 tab：始终只有 WEB / DESKTOP 两项，标签只表明分组，不掺入源名
+  // （当前源由 tab 右侧的标题单独显示）。
+  const groupOptions = useMemo(
+    () => ([
+      { value: 'web' as ProviderKind, label: t('admin.storage_group_web', language), icon: Server },
+      { value: 'plugin' as ProviderKind, label: t('admin.storage_group_desktop', language), icon: HardDrive },
+    ]).map(option => ({
+      ...option,
+      // 没有可用源的分组置灰：该组多半是插件全未安装（卸载会保留源记录，
+      // 但不可用的源不会出现在这里），可点却无反应会让人以为界面坏了。
+      disabled: !providers.some(item => item.kind === option.value),
+    })),
+    [providers, language],
+  )
 
   const loadFiles = useCallback(async () => {
     if (!provider) {
@@ -401,7 +512,8 @@ function StorageCleanupPage() {
     setLoading(true)
     try {
       // 状态筛选在客户端完成（见 baseList），此处只按源取完整清单。
-      const result = await ScanStorage({ provider })
+      // kind 决定这次扫描走服务器代理还是本地插件运行时。
+      const result = await ScanStorage({ provider, kind: activeKind })
       setFiles(result?.files || [])
       setScanVendor(result?.vendor || '')
       setScanSourceName(result?.sourceName || '')
@@ -416,7 +528,7 @@ function StorageCleanupPage() {
     } finally {
       setLoading(false)
     }
-  }, [provider])
+  }, [provider, activeKind])
 
   const fetchSources = useCallback(async () => {
     try {
@@ -425,10 +537,8 @@ function StorageCleanupPage() {
     } catch {}
   }, [])
 
-  const providers = useMemo(() => getProviders(storageSources), [storageSources])
-
   // 同步存储源列表后校正 provider：仅在当前源失效时切到第一个可用源。
-  // 首次进入时 provider 为空，这里会选中第一个插件源，从而触发首次扫描。
+  // 首次进入时 provider 为空，这里会选中列表首项（服务器「本地存储」），随后触发扫描。
   useEffect(() => {
     if (providers.length === 0) return
     if (providers.some(p => p.value === provider)) return
@@ -470,6 +580,18 @@ function StorageCleanupPage() {
     setSearch('')
   }
 
+  // 点击分组 tab 只是**打开该组的源列表**，不切换分组——必须在下拉里选到源才真正切过去。
+  // 点同一个 tab 是收起/再展开。`activeKind` 始终来自已选中的源，所以「没选」＝「没变」。
+  const openGroupMenu = (kind: ProviderKind) => {
+    if (!providers.some(item => item.kind === kind)) return
+    setMenuKind(current => (current === kind ? null : kind))
+  }
+
+  const selectSource = (next: string) => {
+    switchProvider(next)
+    setMenuKind(null)
+  }
+
   const clearSearch = () => {
     setSearchInput('')
     setSearch('')
@@ -477,15 +599,12 @@ function StorageCleanupPage() {
 
   // ── 客户端过滤：状态 + 搜索 + 仅异常 + 文件夹 ───────────
   //
-  // 这些筛选全部在客户端完成：后端一次返回该源的完整对象清单，
-  // 「missing」又是 missing_original 与 missing_thumbnail 的聚合视图，
-  // 交给服务端反而无法用单值匹配。
+  // 这些筛选全部在客户端完成：后端一次返回该源的完整清单。状态是严格相等匹配
+  // （与服务器端 /admin/storage/scan 的 status 语义一致）——"missing" 专指
+  // 「原图与缩略图均缺失」，另外两种缺失各有独立状态，不再折叠进来。
 
   const matchesStatus = useCallback((file: services.StorageObjectDTO) => {
     if (!statusFilter) return true
-    if (statusFilter === 'missing') {
-      return file.status === 'missing_original' || file.status === 'missing_thumbnail'
-    }
     return file.status === statusFilter
   }, [statusFilter])
 
@@ -622,20 +741,21 @@ function StorageCleanupPage() {
       .filter(f => selected.has(f.key) && f.status === 'orphan')
       .map(f => f.key)
 
-    // 缺失文件：照片记录存在、但源上对象已不在 → 这不是删除源文件，而是
-    // 由后端清理本地资源库里指向空对象的失效投影记录。
+    // 缺失文件：记录存在、但源上对象已不在 → 这不是删除源文件，而是修复记录。
+    // 两个后端的修复内容不同（服务器删自己的照片行，桌面端清本地失效投影），
+    // 由 kind 路由，前端只负责把属于该后端的 photoId 传回去。
     const missingIds = files
-      .filter(f => selected.has(f.key) && f.photoId && (f.status === 'missing_original' || f.status === 'missing_thumbnail'))
+      .filter(f => selected.has(f.key) && f.photoId && MISSING_STATUSES.has(f.status))
       .map(f => f.photoId!)
 
     setCleanupDeleting(true)
     try {
       if (orphanKeys.length > 0) {
-        await CleanupStorage(orphanKeys, provider)
+        await CleanupStorage({ provider, kind: activeKind, keys: orphanKeys })
       }
 
       if (missingIds.length > 0) {
-        await FixMissingPhotos(missingIds)
+        await FixMissingPhotos({ kind: activeKind, photoIds: missingIds })
       }
 
       setSelected(new Set())
@@ -653,7 +773,7 @@ function StorageCleanupPage() {
     if (!file.photoId) return
     setGeneratingThumb(prev => new Set(prev).add(file.photoId!))
     try {
-      await GenerateThumbnail(file.photoId)
+      await GenerateThumbnail({ kind: activeKind, photoId: file.photoId })
       toast.success(t('admin.notify_success', language))
       loadFiles()
     } catch (err: unknown) {
@@ -685,50 +805,87 @@ function StorageCleanupPage() {
 
   return (
     <>
-      {/* 内容工具栏：与照片库/胶卷保持一致的位置与样式 */}
-      <div className="flex min-h-13 shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2" style={{ borderColor: 'var(--border)' }}>
-        {/* 存储源切换 */}
-        <SegmentedTabs
-          size="sm"
-          fill={false}
-          ariaLabel={t('admin.storage_provider', language)}
-          value={provider}
-          onChange={switchProvider}
-          options={providers.map(({ value, label, icon }) => ({
-            value,
-            label: label || value,
-            icon,
-          }))}
-        />
+      {/* 页面表头：与资源库同构——「图标徽标 + 页面名」在左，其后是分组 tab 与当前存储源。
+          筛选/操作控件不在这一行，它们归到右侧内容区顶部（见下方 main）。 */}
+      <div className="flex min-h-13 shrink-0 flex-wrap items-center gap-3 border-b px-3 py-2" style={{ borderColor: 'var(--border)' }}>
+        <div className="flex min-w-0 shrink-0 items-center gap-2.5">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-secondary text-foreground">
+            <HardDrive size={14} />
+          </span>
+          <span className="truncate text-xs font-semibold">
+            {t('admin.page_storage', language)}
+          </span>
+        </div>
 
-        <SelectDropdown
-          value={statusFilter}
-          options={statusOptions}
-          onChange={value => setStatusFilter(String(value))}
-          placeholder={t('admin.all_status', language)}
-          clearLabel={t('admin.all_status', language)}
-          ariaLabel={t('admin.storage_file_status', language)}
-          className="w-32 shrink-0"
-        />
+        {/* 分组 tab：WEB（服务器存储）/ DESKTOP（本机插件源）互斥。
+            点击某个 tab 才在其下方展开该组的源列表——不是常驻控件，
+            也不把两组混进同一个列表。 */}
+        <div ref={groupStackRef} className="relative shrink-0">
+          <SegmentedTabs
+            size="sm"
+            fill={false}
+            ariaLabel={t('admin.storage_group', language)}
+            value={activeKind}
+            onChange={openGroupMenu}
+            options={groupOptions.map(({ value, label, icon, disabled }) => ({
+              value,
+              label,
+              icon,
+              disabled,
+              title: disabled ? t('admin.storage_group_empty', language) : label,
+            }))}
+          />
 
-        {/* 仅异常 */}
-        <button
-          type="button"
-          onClick={() => setIssuesOnly(value => !value)}
-          className="flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition-colors hover:bg-secondary"
-          style={{
-            borderColor: 'var(--border)',
-            backgroundColor: issuesOnly ? 'var(--accent)' : 'var(--background)',
-            color: issuesOnly ? 'var(--accent-foreground)' : 'var(--muted-foreground)',
-          }}
-        >
-          <AlertTriangle size={12} />
-          {t('admin.storage_only_issues', language)}
-        </button>
+          {menuKind !== null && (
+            <div
+              role="listbox"
+              aria-label={t('admin.storage_provider', language)}
+              className="desktop-menu-surface absolute left-0 top-full z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border shadow-lg"
+              style={{ borderColor: 'var(--border)', backgroundColor: 'var(--background)' }}
+            >
+              {providerOptions.map(option => {
+                const active = option.value === provider
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="option"
+                    aria-selected={active}
+                    onClick={() => selectSource(option.value)}
+                    className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-xs hover:bg-muted/50"
+                    style={{ color: active ? 'var(--primary)' : 'var(--foreground)' }}
+                  >
+                    {/* 面板与 tab 等宽（较窄），长源名截断并靠 title 补全，
+                        换行会把单行选项撑成多行、列表高度跳动。 */}
+                    <span className="min-w-0 truncate" title={option.label}>{option.label}</span>
+                    {active && <CheckCircle2 size={12} className="shrink-0" />}
+                  </button>
+                )
+              })}
+              {providerOptions.length === 0 && (
+                <div className="px-3 py-1.5 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                  {t('admin.storage_no_sources', language)}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
-        {/* 存储产品标识：「s3-compatible」这类协议族名看不出实际存在哪，
-            vendor 是两端共享的具体产品标识，这里直接展示以便确认扫的是哪个桶。 */}
-        {scanVendor && (
+        {/* 当前存储源标题：紧跟在分组 tab 右侧。tab 标签只写分组名，
+            所以这里带 `WEB - `/`DESKTOP - ` 前缀标明它属于哪一组。 */}
+        {activeSourceLabel && (
+          <span
+            className="shrink-0 truncate text-xs font-medium"
+            style={{ color: 'var(--foreground)', maxWidth: '16rem' }}
+            title={`${activeKindLabel} - ${activeSourceLabel}`}
+          >
+            {activeKindLabel} - {activeSourceLabel}
+          </span>
+        )}
+
+        {/* 插件源的具体存储产品：「s3-compatible」这类协议族名看不出对象实际存在哪，
+            vendor 是两端共享的产品标识。归属在源信息里，故留在表头。 */}
+        {activeKind === 'plugin' && scanVendor && (
           <span
             className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium"
             style={{ borderColor: 'var(--border)', color: 'var(--muted-foreground)' }}
@@ -738,40 +895,6 @@ function StorageCleanupPage() {
             {vendorLabel(scanVendor)}
           </span>
         )}
-
-        {/* 搜索 */}
-        <div className="relative min-w-0 max-w-sm flex-1">
-          <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--muted-foreground)' }} />
-          <input
-            type="text"
-            value={searchInput}
-            onChange={event => setSearchInput(event.target.value)}
-            onKeyDown={event => event.key === 'Enter' && setSearch(searchInput.trim())}
-            placeholder={t('common.search', language)}
-            className="h-8 w-full rounded-md border bg-input pl-8 pr-8 text-xs outline-none focus:ring-1"
-            style={{ borderColor: 'var(--border)' }}
-          />
-          {searchInput && (
-            <button
-              type="button"
-              onClick={clearSearch}
-              aria-label={t('common.close', language)}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-secondary"
-            >
-              <X size={13} />
-            </button>
-          )}
-        </div>
-
-        <button
-          onClick={() => void loadFiles()}
-          disabled={loading || !provider}
-          className="ml-auto flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-50"
-          style={{ backgroundColor: 'var(--primary)', color: 'var(--primary-foreground)' }}
-        >
-          {loading ? <Loader2 size={14} className="animate-spin" /> : <HardDrive size={14} />}
-          {loading ? t('admin.storage_scanning', language) : t('admin.storage_scan', language)}
-        </button>
       </div>
 
       {/* 主区域：左侧概览/文件夹 + 右侧文件列表（桌面 master-detail） */}
@@ -853,6 +976,69 @@ function StorageCleanupPage() {
 
         {/* 右侧文件列表 */}
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* 筛选与操作条：原先挤在页面表头右侧，现下移到内容区顶部。
+              这些控件作用的对象就是下面的文件列表，贴着它比放在表头更顺。 */}
+          <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2" style={{ borderColor: 'var(--border)' }}>
+            <SelectDropdown
+              value={statusFilter}
+              options={statusOptions}
+              onChange={value => setStatusFilter(String(value))}
+              placeholder={t('admin.all_status', language)}
+              clearLabel={t('admin.all_status', language)}
+              ariaLabel={t('admin.storage_file_status', language)}
+              className="w-32 shrink-0"
+            />
+
+            {/* 仅异常 */}
+            <button
+              type="button"
+              onClick={() => setIssuesOnly(value => !value)}
+              className="flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition-colors hover:bg-secondary"
+              style={{
+                borderColor: 'var(--border)',
+                backgroundColor: issuesOnly ? 'var(--accent)' : 'var(--background)',
+                color: issuesOnly ? 'var(--accent-foreground)' : 'var(--muted-foreground)',
+              }}
+            >
+              <AlertTriangle size={12} />
+              {t('admin.storage_only_issues', language)}
+            </button>
+
+            {/* 搜索 */}
+            <div className="relative min-w-0 max-w-sm flex-1">
+              <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--muted-foreground)' }} />
+              <input
+                type="text"
+                value={searchInput}
+                onChange={event => setSearchInput(event.target.value)}
+                onKeyDown={event => event.key === 'Enter' && setSearch(searchInput.trim())}
+                placeholder={t('common.search', language)}
+                className="h-8 w-full rounded-md border bg-input pl-8 pr-8 text-xs outline-none focus:ring-1"
+                style={{ borderColor: 'var(--border)' }}
+              />
+              {searchInput && (
+                <button
+                  type="button"
+                  onClick={clearSearch}
+                  aria-label={t('common.close', language)}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 hover:bg-secondary"
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+
+            <button
+              onClick={() => void loadFiles()}
+              disabled={loading || !provider}
+              className="ml-auto flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-50"
+              style={{ backgroundColor: 'var(--primary)', color: 'var(--primary-foreground)' }}
+            >
+              {loading ? <Loader2 size={14} className="animate-spin" /> : <HardDrive size={14} />}
+              {loading ? t('admin.storage_scanning', language) : t('admin.storage_scan', language)}
+            </button>
+          </div>
+
           {/* 列表头 */}
           <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b px-3" style={{ borderColor: 'var(--border)' }}>
             <div className="flex min-w-0 items-center gap-2">
@@ -989,14 +1175,9 @@ function StorageCleanupPage() {
 
           {/* 文件行 */}
           <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto">
-            {providers.length === 0 ? (
-              <div className="flex h-full min-h-48 flex-col items-center justify-center gap-3 p-6 text-center" style={{ color: 'var(--muted-foreground)' }}>
-                <span className="flex size-14 items-center justify-center rounded-lg" style={{ backgroundColor: 'var(--muted)' }}>
-                  <Cloud size={24} />
-                </span>
-                <p className="text-sm">{t('admin.storage_no_sources', language)}</p>
-              </div>
-            ) : loading ? (
+            {/* 不存在「没有任何存储源」的状态：服务器存储源是固定枚举，永远在列表中，
+                因此这里直接从加载态/空态开始。 */}
+            {loading ? (
               Array.from({ length: 6 }, (_, index) => (
                 <div key={index} className="flex items-center gap-3 border-b px-3 py-2" style={{ borderColor: 'var(--border)' }}>
                   <div className="size-4 shrink-0 animate-pulse rounded" style={{ backgroundColor: 'var(--muted)' }} />

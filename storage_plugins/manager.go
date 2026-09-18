@@ -339,16 +339,44 @@ func (m *Manager) PluginLocation(pluginID string) (string, error) {
 	return "", fmt.Errorf("storage plugin not found: %s", pluginID)
 }
 
+// installedPluginIDs collects the ids of plugin packages that are present and
+// usable. The predicate mirrors commandFor exactly (Installed && ManifestPath),
+// so "available" reported to the renderer means a runtime can really start —
+// reporting a source as available that commandFor would then reject is the bug
+// this guards against.
+func (m *Manager) installedPluginIDs() map[string]bool {
+	result := make(map[string]bool)
+	for _, plugin := range m.ListPlugins() {
+		if plugin.Installed && plugin.ManifestPath != "" {
+			result[plugin.ID] = true
+		}
+	}
+	return result
+}
+
+// PluginInstalled reports whether one plugin package is currently installed.
+func (m *Manager) PluginInstalled(pluginID string) bool {
+	pluginID = strings.TrimSpace(pluginID)
+	if pluginID == "" {
+		return false
+	}
+	return m.installedPluginIDs()[pluginID]
+}
+
 func (m *Manager) ListSources() []SourceDTO {
 	sources := m.registry.list()
+	// One discovery pass for the whole list: ListPlugins walks the plugin
+	// directories, so probing per source would multiply that cost.
+	installed := m.installedPluginIDs()
 	result := make([]SourceDTO, 0, len(sources))
 	for _, source := range sources {
 		result = append(result, SourceDTO{
 			ID: source.ID, Name: source.Name, PluginID: source.PluginID,
-			PluginVersion: source.PluginVersion,
-			Vendor:        InferVendor(source.PluginID, source.Config),
-			Config:        cloneStringMap(source.Config),
-			Enabled:       source.Enabled, Status: source.Status, LastError: source.LastError,
+			PluginVersion:   source.PluginVersion,
+			Vendor:          InferVendor(source.PluginID, source.Config),
+			PluginInstalled: installed[source.PluginID],
+			Config:          cloneStringMap(source.Config),
+			Enabled:         source.Enabled, Status: source.Status, LastError: source.LastError,
 			CreatedAt: source.CreatedAt, UpdatedAt: source.UpdatedAt,
 		})
 	}
@@ -394,7 +422,7 @@ func (m *Manager) CreateSource(input SourceInput) (SourceDTO, error) {
 	if err != nil {
 		return SourceDTO{}, err
 	}
-	return sourceDTO(source), nil
+	return m.sourceDTO(source), nil
 }
 
 func (m *Manager) UpdateSource(input SourceInput) (SourceDTO, error) {
@@ -414,7 +442,7 @@ func (m *Manager) UpdateSource(input SourceInput) (SourceDTO, error) {
 	if err != nil {
 		return SourceDTO{}, err
 	}
-	return sourceDTO(source), nil
+	return m.sourceDTO(source), nil
 }
 
 // normalizeSourceInput makes the installed catalog authoritative. Command and
@@ -468,7 +496,7 @@ func (m *Manager) SetSourceEnabled(id string, enabled bool) (SourceDTO, error) {
 		updated.Status = "disabled"
 		m.registry.updateStatus(id, "disabled", "")
 	}
-	return sourceDTO(updated), nil
+	return m.sourceDTO(updated), nil
 }
 
 func (m *Manager) DeleteSource(id string) error {
@@ -914,13 +942,14 @@ func (m *Manager) StopAll() {
 	}
 }
 
-func sourceDTO(source Source) SourceDTO {
+func (m *Manager) sourceDTO(source Source) SourceDTO {
 	return SourceDTO{
 		ID: source.ID, Name: source.Name, PluginID: source.PluginID,
-		PluginVersion: source.PluginVersion,
-		Vendor:        InferVendor(source.PluginID, source.Config),
-		Config:        cloneStringMap(source.Config),
-		Enabled:       source.Enabled, Status: source.Status, LastError: source.LastError,
+		PluginVersion:   source.PluginVersion,
+		Vendor:          InferVendor(source.PluginID, source.Config),
+		PluginInstalled: m.PluginInstalled(source.PluginID),
+		Config:          cloneStringMap(source.Config),
+		Enabled:         source.Enabled, Status: source.Status, LastError: source.LastError,
 		CreatedAt: source.CreatedAt, UpdatedAt: source.UpdatedAt,
 	}
 }

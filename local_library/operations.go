@@ -791,7 +791,12 @@ func (m *Manager) AssetHandler() http.Handler {
 				return
 			}
 			if isRAWExtension(filepath.Ext(resolved)) {
-				preview, previewErr := largestEmbeddedJPEGWithValidatorContext(r.Context(), file, maxRAWPreviewScanBytes, validateOriginalViewDimensions)
+				// Same extraction as the inspector: a RAW whose preview the
+				// container points at (3FR above all) is unreachable through a
+				// fixed-size blind scan, so viewing the original has to follow
+				// the pointers too or the frame stays dark while the grid tile
+				// lights up.
+				preview, previewErr := embeddedRAWPreviewWithValidator(r.Context(), file, validateOriginalViewDimensions)
 				if previewErr != nil {
 					http.Error(w, "RAW embedded preview unavailable", http.StatusUnprocessableEntity)
 					return

@@ -22,6 +22,10 @@ export function AppendZineLogs(arg1) {
   return window['go']['main']['App']['AppendZineLogs'](arg1);
 }
 
+export function ApplyLocalAssetImageEdit(arg1) {
+  return window['go']['main']['App']['ApplyLocalAssetImageEdit'](arg1);
+}
+
 export function BatchDeletePhotos(arg1) {
   return window['go']['main']['App']['BatchDeletePhotos'](arg1);
 }
@@ -70,8 +74,8 @@ export function CheckLocalLibraryUpgrade(arg1) {
   return window['go']['main']['App']['CheckLocalLibraryUpgrade'](arg1);
 }
 
-export function CleanupStorage(arg1, arg2) {
-  return window['go']['main']['App']['CleanupStorage'](arg1, arg2);
+export function CleanupStorage(arg1) {
+  return window['go']['main']['App']['CleanupStorage'](arg1);
 }
 
 export function ClearAuth() {
@@ -212,6 +216,10 @@ export function DeleteLocalAssetCloudAndLocal(arg1, arg2) {
 
 export function DeleteLocalDraft(arg1) {
   return window['go']['main']['App']['DeleteLocalDraft'](arg1);
+}
+
+export function DeleteLocalLibraryBackup(arg1) {
+  return window['go']['main']['App']['DeleteLocalLibraryBackup'](arg1);
 }
 
 export function DeleteLocalLibraryCollection(arg1) {

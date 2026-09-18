@@ -12,6 +12,7 @@ import { LocalLibrary } from '@/features/library/local/LocalLibrary'
 import type { LocalAsset } from '@/features/library/local/types'
 import type { Photo } from '@/types'
 import { GlassBackdrop } from '@/components/ui/liquid-glass'
+import { cn } from '@/lib/utils'
 
 
 export type LibrarySource = 'cloud' | 'local-library'
@@ -19,6 +20,16 @@ export type LibrarySource = 'cloud' | 'local-library'
 interface PhotoLibraryDialogBaseProps {
   source: LibrarySource | null
   onClose: () => void
+  /**
+   * 弹窗内可切换的取图来源（顶部 tab）。缺省只含当前 source，不显示切换控件。
+   * 调用方按可用性裁剪（未连接站点时不传 'cloud'）。
+   */
+  sources?: LibrarySource[]
+  /**
+   * 用户切换来源时通知父级；父级必须同步更新受控的 source，
+   * 否则下一次渲染会因 source 未变而把选择切回来。
+   */
+  onSourceChange?: (source: LibrarySource) => void
 }
 
 interface ZinePhotoLibraryDialogProps extends PhotoLibraryDialogBaseProps {
@@ -47,7 +58,24 @@ interface LocalPhotoLibraryDialogProps extends PhotoLibraryDialogBaseProps {
   onImportAssets?: never
 }
 
-type PhotoLibraryDialogProps = ZinePhotoLibraryDialogProps | CloudPhotoLibraryDialogProps | LocalPhotoLibraryDialogProps
+/**
+ * 双来源：云端与本地资源库都可选，在弹窗内切换，各有独立回调。
+ * 编辑器素材库用这个变体 —— 已连接站点时两个入口都开；未连接时只留本地资源库。
+ */
+interface DualPhotoLibraryDialogProps extends PhotoLibraryDialogBaseProps {
+  existingPhotoIds?: string[]
+  onImportPhotos?: (photos: Photo[]) => void
+  onImportLocalAssets?: (assets: LocalAsset[]) => void
+  existingAssets?: never
+  onImportAssets?: never
+  existingLocalAssetIds?: never
+}
+
+type PhotoLibraryDialogProps =
+  | ZinePhotoLibraryDialogProps
+  | CloudPhotoLibraryDialogProps
+  | LocalPhotoLibraryDialogProps
+  | DualPhotoLibraryDialogProps
 
 function cloudPhotoToZineAsset(photo: Photo): ZineAsset {
   return {
@@ -80,12 +108,13 @@ function localPhotoToZineAsset(asset: LocalAsset): ZineAsset {
 }
 
 export function PhotoLibraryDialog(props: PhotoLibraryDialogProps) {
-  const { source, onClose } = props
+  const { source, onClose, sources, onSourceChange } = props
   const language = usePreferences((state) => state.language)
   const [selectedCloudPhotos, setSelectedCloudPhotos] = useState<Photo[]>([])
   const [selectedLocalAssets, setSelectedLocalAssets] = useState<LocalAsset[]>([])
   const [selectionSource, setSelectionSource] = useState(source)
 
+  // 受控同步：父级改变 source（打开/关闭/换源）时对齐内部状态并清空选择
   if (source !== selectionSource) {
     setSelectionSource(source)
     setSelectedCloudPhotos([])
@@ -106,11 +135,23 @@ export function PhotoLibraryDialog(props: PhotoLibraryDialogProps) {
   const handleLocalSelection = useCallback((assets: LocalAsset[]) => {
     setSelectedLocalAssets(assets)
   }, [])
+
+  /** 只有多来源且父级能同步受控值时才显示切换 tab */
+  const availableSources = sources && sources.length > 1 && onSourceChange ? sources : []
+  const handleSwitchSource = useCallback((next: LibrarySource) => {
+    setSelectionSource(next)
+    setSelectedCloudPhotos([])
+    setSelectedLocalAssets([])
+    onSourceChange?.(next)
+  }, [onSourceChange])
+
   const existingCloudIds = 'existingPhotoIds' in props
-    ? props.existingPhotoIds
-    : (props.existingAssets ?? [])
-      .filter((asset) => asset.origin === 'cloud-library' || (!asset.origin && asset.id.startsWith('library_')))
-      .map((asset) => asset.libraryPhotoId ?? asset.id.replace(/^library_/, ''))
+    ? (props.existingPhotoIds ?? [])
+    : 'existingAssets' in props
+      ? (props.existingAssets ?? [])
+        .filter((asset) => asset.origin === 'cloud-library' || (!asset.origin && asset.id.startsWith('library_')))
+        .map((asset) => asset.libraryPhotoId ?? asset.id.replace(/^library_/, ''))
+      : []
   const existingLocalIds = 'existingLocalAssetIds' in props
     ? (props.existingLocalAssetIds ?? [])
     : 'existingAssets' in props
@@ -126,15 +167,12 @@ export function PhotoLibraryDialog(props: PhotoLibraryDialogProps) {
   const Icon = cloud ? Cloud : HardDrive
   const selectedCount = cloud ? selectedCloudPhotos.length : selectedLocalAssets.length
   function handleImport() {
-    if ('onImportPhotos' in props) {
-      props.onImportPhotos!(selectedCloudPhotos)
-    } else if ('onImportLocalAssets' in props) {
-      props.onImportLocalAssets!(selectedLocalAssets)
+    if (cloud) {
+      if ('onImportPhotos' in props) props.onImportPhotos?.(selectedCloudPhotos)
+      else if ('onImportAssets' in props) props.onImportAssets?.(selectedCloudPhotos.map(cloudPhotoToZineAsset))
     } else {
-      const assets = cloud
-        ? selectedCloudPhotos.map(cloudPhotoToZineAsset)
-        : selectedLocalAssets.map(localPhotoToZineAsset)
-      props.onImportAssets!(assets)
+      if ('onImportLocalAssets' in props) props.onImportLocalAssets?.(selectedLocalAssets)
+      else if ('onImportAssets' in props) props.onImportAssets?.(selectedLocalAssets.map(localPhotoToZineAsset))
     }
     onClose()
   }
@@ -159,7 +197,31 @@ export function PhotoLibraryDialog(props: PhotoLibraryDialogProps) {
         ><GlassBackdrop material="regular" />
           <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4" style={{ borderColor: 'var(--border)' }}>
             <Icon size={16} style={{ color: 'var(--muted-foreground)' }} />
-            <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</h2>
+            <h2 className="min-w-0 max-w-[40%] truncate text-sm font-semibold">{title}</h2>
+            {availableSources.length > 1 ? (
+              <div className="flex shrink-0 items-center gap-0.5 rounded-md border p-0.5" style={{ borderColor: 'var(--border)' }}>
+                {availableSources.map((item) => {
+                  const active = item === source
+                  const SourceIcon = item === 'cloud' ? Cloud : HardDrive
+                  return (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => handleSwitchSource(item)}
+                      aria-pressed={active}
+                      className={cn(
+                        'flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition-colors',
+                        active ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      <SourceIcon size={12} />
+                      {t(item === 'cloud' ? 'admin.zine_source_cloud' : 'admin.zine_source_local_library', language)}
+                    </button>
+                  )
+                })}
+              </div>
+            ) : null}
+            <div className="min-w-0 flex-1" />
             <button type="button" onClick={onClose} aria-label={t('common.close', language)} title={t('common.close', language)} className="flex h-8 w-8 items-center justify-center rounded-md transition hover:bg-accent">
               <X size={16} />
             </button>

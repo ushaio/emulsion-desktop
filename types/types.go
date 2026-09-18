@@ -8,6 +8,11 @@ type StorageSourceDTO struct {
 	Runtime      string            `json:"runtime,omitempty"`
 	PluginID     string            `json:"pluginId,omitempty"`
 	Local        bool              `json:"local,omitempty"`
+	// PluginInstalled mirrors storage_plugins.SourceDTO.PluginInstalled: false
+	// means the source outlived its plugin (uninstalling keeps sources so
+	// reinstalling restores them). The settings page surfaces this so a source
+	// that disappears from storage maintenance is explainable, not mysterious.
+	PluginInstalled bool   `json:"pluginInstalled"`
 	Enabled      bool              `json:"enabled"`
 	Status       string            `json:"status,omitempty"`
 	LastError    string            `json:"lastError,omitempty"`

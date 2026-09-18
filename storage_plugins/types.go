@@ -16,6 +16,7 @@ const (
 
 	PluginGitHub       = "github"
 	PluginS3Compatible = "s3-compatible"
+	PluginWebDAV       = "webdav"
 	pluginAPIVersion   = "1"
 
 	PluginTypeExecutable = "executable"
@@ -78,13 +79,19 @@ type SourceDTO struct {
 	// ...). PluginID only identifies the protocol adapter, so it cannot tell
 	// two S3-compatible providers apart; Vendor is the cross-platform label
 	// the desktop and the web server agree on. See vendor.go.
-	Vendor    string            `json:"vendor,omitempty"`
-	Config    map[string]string `json:"config,omitempty"`
-	Enabled   bool              `json:"enabled"`
-	Status    string            `json:"status,omitempty"`
-	LastError string            `json:"lastError,omitempty"`
-	CreatedAt time.Time         `json:"createdAt"`
-	UpdatedAt time.Time         `json:"updatedAt"`
+	Vendor string `json:"vendor,omitempty"`
+	// PluginInstalled reports whether this source's plugin package is present.
+	// Uninstalling a plugin deliberately keeps its sources (so reinstalling
+	// restores the configuration), which means a configured source can outlive
+	// its plugin. Callers that need a *usable* source must check this: a source
+	// without its plugin cannot be scanned, uploaded to, or moved from.
+	PluginInstalled bool              `json:"pluginInstalled"`
+	Config          map[string]string `json:"config,omitempty"`
+	Enabled         bool              `json:"enabled"`
+	Status          string            `json:"status,omitempty"`
+	LastError       string            `json:"lastError,omitempty"`
+	CreatedAt       time.Time         `json:"createdAt"`
+	UpdatedAt       time.Time         `json:"updatedAt"`
 }
 
 type Manifest struct {

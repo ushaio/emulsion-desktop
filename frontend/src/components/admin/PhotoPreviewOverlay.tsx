@@ -19,7 +19,8 @@ export function PhotoPreviewOverlay({ photo, t, onClose, onPrevious, onNext, has
     originalSrc={photoAssetSrc({ ...photo, thumbnailUrl: null, thumbPath: undefined })}
     previewSrc={photoAssetSrc(photo)}
     alt={photo.title || ''}
-    copy={{ viewOriginal: t('admin.view_original'), fitWindow: t('admin.preview_fit'), zoomOut: t('admin.zine_zoom_out'), resetZoom: t('admin.preview_fit'), zoomIn: t('admin.zine_zoom_in'), close: t('common.cancel'), previous: t('story.detail_previous_photo'), next: t('story.detail_next_photo'), loading: t('common.loading') }}
+    progressive
+    copy={{ zoomOut: t('admin.zine_zoom_out'), resetZoom: t('admin.preview_fit'), zoomIn: t('admin.zine_zoom_in'), close: t('common.cancel'), previous: t('story.detail_previous_photo'), next: t('story.detail_next_photo'), loading: t('common.loading') }}
     onClose={onClose}
     onPrevious={onPrevious}
     onNext={onNext}

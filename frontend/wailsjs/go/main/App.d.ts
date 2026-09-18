@@ -19,6 +19,8 @@ export function AppendEditorAiMessage(arg1:services.EditorAiMessageAppendInput):
 
 export function AppendZineLogs(arg1:Array<string>):Promise<void>;
 
+export function ApplyLocalAssetImageEdit(arg1:local_library.ApplyImageEditInput):Promise<local_library.ImageEditResult>;
+
 export function BatchDeletePhotos(arg1:services.BatchDeleteParams):Promise<services.BatchResult>;
 
 export function BatchUpdateLocalAssetOrganization(arg1:local_library.BatchAssetOrganizationUpdate):Promise<void>;
@@ -43,7 +45,7 @@ export function CheckForUpdates(arg1:string,arg2:boolean):Promise<services.Updat
 
 export function CheckLocalLibraryUpgrade(arg1:string):Promise<Record<string, any>>;
 
-export function CleanupStorage(arg1:Array<string>,arg2:string):Promise<services.StorageCleanupResult>;
+export function CleanupStorage(arg1:services.StorageCleanupParams):Promise<services.StorageCleanupResult>;
 
 export function ClearAuth():Promise<void>;
 
@@ -115,6 +117,8 @@ export function DeleteLocalAssetCloudAndLocal(arg1:string,arg2:boolean):Promise<
 
 export function DeleteLocalDraft(arg1:string):Promise<void>;
 
+export function DeleteLocalLibraryBackup(arg1:string):Promise<void>;
+
 export function DeleteLocalLibraryCollection(arg1:string):Promise<void>;
 
 export function DeleteLocalLibraryCollectionGroup(arg1:string,arg2:boolean):Promise<void>;
@@ -153,9 +157,9 @@ export function FetchURLMetadata(arg1:string):Promise<main.FetchURLMetadataResul
 
 export function FinishEditorAiMessage(arg1:services.EditorAiMessageFinishInput):Promise<services.EditorAiMessageDTO>;
 
-export function FixMissingPhotos(arg1:Array<string>):Promise<services.FixMissingPhotosResult>;
+export function FixMissingPhotos(arg1:services.StorageMissingParams):Promise<services.FixMissingPhotosResult>;
 
-export function GenerateThumbnail(arg1:string):Promise<void>;
+export function GenerateThumbnail(arg1:services.StorageThumbnailParams):Promise<void>;
 
 export function GetAgentExtensionSnapshot():Promise<agent_extensions.AgentExtensionSnapshot>;
 

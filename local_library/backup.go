@@ -3,6 +3,7 @@ package local_library
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -27,10 +28,84 @@ const (
 )
 
 type BackupInfo struct {
-	ID        string    `json:"id"`
-	Kind      string    `json:"kind"`
-	CreatedAt time.Time `json:"createdAt"`
-	SizeBytes int64     `json:"sizeBytes"`
+	ID            string    `json:"id"`
+	Kind          string    `json:"kind"`
+	CreatedAt     time.Time `json:"createdAt"`
+	SizeBytes     int64     `json:"sizeBytes"`
+	AppVersion    string    `json:"appVersion,omitempty"`
+	SchemaVersion int       `json:"schemaVersion,omitempty"`
+	AssetCount    int64     `json:"assetCount,omitempty"`
+	Note          string    `json:"note,omitempty"`
+}
+
+// backupMeta is the sidecar payload stored next to each backup database as
+// "<backup file>.json". Older backups created before metadata existed have no
+// sidecar file and keep working with empty fields.
+type backupMeta struct {
+	Kind          string    `json:"kind"`
+	CreatedAt     time.Time `json:"createdAt"`
+	AppVersion    string    `json:"appVersion,omitempty"`
+	SchemaVersion int       `json:"schemaVersion,omitempty"`
+	AssetCount    int64     `json:"assetCount,omitempty"`
+	Note          string    `json:"note,omitempty"`
+}
+
+type backupParams struct {
+	note          string
+	schemaVersion int
+	assetCount    int64
+}
+
+var backupAppVersion = func() string { return "" }
+
+// SetBackupAppVersion records the running application version that is written
+// into every backup metadata file created afterwards.
+func SetBackupAppVersion(version string) {
+	backupAppVersion = func() string { return version }
+}
+
+func backupMetaPath(backupPath string) string { return backupPath + ".json" }
+
+const backupNoteLimit = 200
+
+func normalizeBackupNote(note string) string {
+	note = strings.TrimSpace(note)
+	note = strings.Join(strings.Fields(note), " ")
+	if runes := []rune(note); len(runes) > backupNoteLimit {
+		note = string(runes[:backupNoteLimit])
+	}
+	return note
+}
+
+func countAssets(db *sql.DB) int64 {
+	if db == nil {
+		return 0
+	}
+	var count int64
+	if err := db.QueryRow(`SELECT COUNT(*) FROM assets`).Scan(&count); err != nil {
+		return 0
+	}
+	return count
+}
+
+func writeBackupMeta(backupPath string, meta backupMeta) error {
+	payload, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(backupMetaPath(backupPath), payload, 0o600)
+}
+
+func readBackupMeta(backupPath string) backupMeta {
+	payload, err := os.ReadFile(backupMetaPath(backupPath))
+	if err != nil {
+		return backupMeta{}
+	}
+	var meta backupMeta
+	if err := json.Unmarshal(payload, &meta); err != nil {
+		return backupMeta{}
+	}
+	return meta
 }
 
 type BackupOverview struct {
@@ -165,11 +240,19 @@ func listBackupFiles(root string) ([]BackupInfo, error) {
 		if err != nil {
 			continue
 		}
+		meta := readBackupMeta(filepath.Join(backupDirectory(root), entry.Name()))
+		if meta.Kind != kind && meta.Kind != "" {
+			continue
+		}
 		items = append(items, BackupInfo{
-			ID:        entry.Name(),
-			Kind:      kind,
-			CreatedAt: info.ModTime().UTC(),
-			SizeBytes: info.Size(),
+			ID:            entry.Name(),
+			Kind:          kind,
+			CreatedAt:     info.ModTime().UTC(),
+			SizeBytes:     info.Size(),
+			AppVersion:    meta.AppVersion,
+			SchemaVersion: meta.SchemaVersion,
+			AssetCount:    meta.AssetCount,
+			Note:          normalizeBackupNote(meta.Note),
 		})
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -229,7 +312,7 @@ func restoreLatestBackupFile(root, kind, databasePath string) error {
 	return os.Rename(temporaryPath, databasePath)
 }
 
-func createBackupFile(ctx context.Context, root, kind string, db *sql.DB) (BackupInfo, error) {
+func createBackupFile(ctx context.Context, root, kind string, db *sql.DB, params backupParams) (BackupInfo, error) {
 	now := time.Now().UTC()
 	name := backupFileName(kind, now)
 	finalPath := filepath.Join(backupDirectory(root), name)
@@ -247,11 +330,36 @@ func createBackupFile(ctx context.Context, root, kind string, db *sql.DB) (Backu
 		_ = os.Remove(temporaryPath)
 		return BackupInfo{}, err
 	}
+	if params.schemaVersion <= 0 {
+		params.schemaVersion = currentSchemaVersion
+	}
+	meta := backupMeta{
+		Kind:          kind,
+		CreatedAt:     now,
+		AppVersion:    backupAppVersion(),
+		SchemaVersion: params.schemaVersion,
+		AssetCount:    params.assetCount,
+		Note:          normalizeBackupNote(params.note),
+	}
+	if err := writeBackupMeta(finalPath, meta); err != nil {
+		_ = os.Remove(finalPath)
+		_ = os.Remove(backupMetaPath(finalPath))
+		return BackupInfo{}, err
+	}
 	info, err := os.Stat(finalPath)
 	if err != nil {
 		return BackupInfo{}, err
 	}
-	return BackupInfo{ID: name, Kind: kind, CreatedAt: info.ModTime().UTC(), SizeBytes: info.Size()}, nil
+	return BackupInfo{
+		ID:            name,
+		Kind:          kind,
+		CreatedAt:     info.ModTime().UTC(),
+		SizeBytes:     info.Size(),
+		AppVersion:    meta.AppVersion,
+		SchemaVersion: meta.SchemaVersion,
+		AssetCount:    meta.AssetCount,
+		Note:          meta.Note,
+	}, nil
 }
 
 func pruneBackups(root, kind string, keep int) error {
@@ -275,6 +383,7 @@ func pruneBackups(root, kind string, keep int) error {
 		if err := os.Remove(filepath.Join(backupDirectory(root), item.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
+		_ = os.Remove(filepath.Join(backupDirectory(root), backupMetaPath(item.ID)))
 	}
 	return nil
 }
@@ -334,7 +443,7 @@ func (m *Manager) runDailyBackup(session *librarySession) {
 		return
 	}
 	if err == nil {
-		_, err = createBackupFile(context.Background(), session.root, BackupKindDaily, session.store.db)
+		_, err = createBackupFile(context.Background(), session.root, BackupKindDaily, session.store.db, backupParams{assetCount: countAssets(session.store.db)})
 	}
 	if err == nil {
 		err = pruneBackups(session.root, BackupKindDaily, dailyBackupRetention)
@@ -409,7 +518,9 @@ func (m *Manager) CreateManualBackup() (BackupInfo, error) {
 	session.mu.Unlock()
 	m.emitSessionEvent(session, "backup_started")
 
-	backup, backupErr := createBackupFile(context.Background(), session.root, BackupKindManual, session.store.db)
+	backup, backupErr := createBackupFile(context.Background(), session.root, BackupKindManual, session.store.db, backupParams{
+		assetCount: countAssets(session.store.db),
+	})
 	session.mu.Lock()
 	if session.state == "backing_up" {
 		session.state = previousState
@@ -421,6 +532,32 @@ func (m *Manager) CreateManualBackup() (BackupInfo, error) {
 	}
 	m.emitSessionEvent(session, "backup_completed")
 	return backup, nil
+}
+
+func (m *Manager) DeleteBackup(id string) error {
+	m.backupMu.Lock()
+	defer m.backupMu.Unlock()
+
+	session, err := m.currentSession()
+	if err != nil {
+		return err
+	}
+	return removeBackupFiles(session.root, id)
+}
+
+func removeBackupFiles(root, id string) error {
+	backupPath, err := resolveBackupPath(root, id)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(backupPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return newError(ErrBackupNotFound, "备份文件不存在", map[string]any{"backupId": id})
+		}
+		return err
+	}
+	_ = os.Remove(backupMetaPath(backupPath))
+	return nil
 }
 
 func (m *Manager) RestoreBackup(id string) (LibrarySnapshot, error) {
@@ -447,7 +584,10 @@ func (m *Manager) RestoreBackup(id string) (LibrarySnapshot, error) {
 	session.mu.Unlock()
 	m.emitSessionEvent(session, "restore_started")
 
-	_, err = createBackupFile(context.Background(), session.root, BackupKindPreRestore, session.store.db)
+	_, err = createBackupFile(context.Background(), session.root, BackupKindPreRestore, session.store.db, backupParams{
+		note:       id,
+		assetCount: countAssets(session.store.db),
+	})
 	if err != nil {
 		session.mu.Lock()
 		session.state = "open"

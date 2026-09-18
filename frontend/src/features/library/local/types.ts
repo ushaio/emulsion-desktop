@@ -77,6 +77,10 @@ export interface BackupInfo {
   kind: BackupKind | string
   createdAt: string
   sizeBytes: number
+  appVersion?: string
+  schemaVersion?: number
+  assetCount?: number
+  note?: string
 }
 
 export interface BackupOverview {
@@ -273,6 +277,8 @@ export interface AssetStructuredFilters {
 export interface AssetQuery extends AssetStructuredFilters {
   cursor?: string
   limit?: number
+  /** 按资产标识直接取行（编辑器素材库恢复草稿中的待传项时用）。 */
+  ids?: string[]
   folder?: string
   directFolderOnly?: boolean
   search?: string
@@ -289,7 +295,7 @@ export interface AssetQuery extends AssetStructuredFilters {
   sortDirection?: AssetSortDirection
 }
 
-const PHOTO_FORMATS = new Set(['jpeg', 'png', 'gif', 'webp', 'tiff', 'heif', 'avif', 'cr2', 'cr3', 'nef', 'arw', 'dng', 'raf', 'rw2'])
+const PHOTO_FORMATS = new Set(['jpeg', 'png', 'bmp', 'gif', 'webp', 'tiff', 'heif', 'avif', 'cr2', 'cr3', 'nef', 'arw', 'dng', 'raf', 'rw2', '3fr'])
 const VIDEO_FORMATS = new Set(['mp4', 'mov'])
 const AUDIO_FORMATS = new Set(['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg'])
 
@@ -318,6 +324,73 @@ export function isAudioAsset(asset: Pick<LocalAsset, 'mediaKind' | 'format'>): b
 /** True for playable media that supports the clip marker (video or audio). */
 export function isPlayableAsset(asset: Pick<LocalAsset, 'mediaKind' | 'format'>): boolean {
   return isVideoAsset(asset) || isAudioAsset(asset)
+}
+
+const EDITABLE_FORMATS = new Set(['jpeg', 'png', 'webp', 'avif'])
+
+/**
+ * True for photos the backend can re-encode in their own format. HEIC, TIFF,
+ * GIF and RAW are excluded on purpose: the Go toolchain decodes them but has no
+ * matching encoder, so rewriting one would leave the file's extension and MIME
+ * type lying about its contents. This must stay in sync with
+ * editableImageFormat in local_library/image_edit.go.
+ */
+export function isEditableImageAsset(asset: Pick<LocalAsset, 'mediaKind' | 'format'>): boolean {
+  if (asset.mediaKind === 'video' || asset.mediaKind === 'audio' || asset.mediaKind === 'file') return false
+  return EDITABLE_FORMATS.has(asset.format.toLowerCase())
+}
+
+/**
+ * Normalized crop rectangle: fractions of the image the rectangle applies to,
+ * which is the original after its EXIF orientation and the requested rotation
+ * and flips have been applied.
+ */
+export interface LocalImageCropRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export type LocalImageEditMode = 'overwrite' | 'copy'
+
+export interface LocalImageEditInput {
+  assetId: string
+  mode: LocalImageEditMode
+  /** Clockwise quarter turns: 0, 90, 180 or 270. */
+  rotation: number
+  /**
+   * A clockwise free rotation in degrees on top of the quarter turns, applied
+   * about the centre of the frame the quarter turns produced. The backend
+   * resamples for it and insets the crop so the corners it opens up are cut
+   * away, so leaving it at zero keeps the whole edit on the lossless integer
+   * path.
+   */
+  angleDeg: number
+  flipH: boolean
+  flipV: boolean
+  crop?: LocalImageCropRect
+}
+
+/**
+ * The refreshed asset identity after a write. modifiedAtNs plus byteSize are
+ * what the derivative cache key is derived from, and the URLs already carry the
+ * rebuilt key, so the renderer can refresh without a second round trip.
+ */
+export interface LocalImageEditResult {
+  assetId: string
+  relativePath: string
+  fileName: string
+  byteSize: number
+  modifiedAtNs: number
+  width: number
+  height: number
+  previewStatus: string
+  thumbnailUrl: string
+  previewUrl: string
+  originalUrl: string
+  /** True when a sibling copy was written instead of overwriting the original. */
+  created: boolean
 }
 
 /** One logical media segment: a database record of mark-in / mark-out points. */

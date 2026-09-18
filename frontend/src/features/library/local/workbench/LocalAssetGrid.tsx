@@ -333,6 +333,16 @@ function distributeMasonryEntries(assets: LocalAsset[], columnCount: number, col
   return columns
 }
 
+/**
+ * 与 index.css 里隐藏一体化标题栏的两条规则一一对应。两者都会让内容区在叠加层
+ * 打开期间多出标题栏的高度（36px），那是叠加层造成的假变化，网格不应据此重排。
+ */
+const WINDOW_CHROME_HIDDEN_BODY_CLASSES = ['mo-fullscreen-preview', 'mo-immersive']
+
+function isWindowChromeHidden() {
+  return WINDOW_CHROME_HIDDEN_BODY_CLASSES.some((name) => document.body.classList.contains(name))
+}
+
 export function LocalAssetGrid({
   assets, folders, selectedIds, focusedId, loading, total, copy, emptyTitle, emptyHint, canUpload, storageSources, storageSourcesLoading, viewMode, gridSize, pathSegments, resetKey, directFolderOnly, onToggleDirectFolderOnly,
   onSelect, onOpen, onOpenFolder, onOpenInFileManager, onClipboard, onUpload, onUploadSettings, onUploadToStorage, onRefreshStorageSources, onDelete, onRename, onMove, onRestore, onRetryPreview, onRecheckMissing, onRemoveMissing,
@@ -347,6 +357,15 @@ export function LocalAssetGrid({
     if (!element) return
     const observer = new ResizeObserver(([entry]) => {
       setWidth(entry.contentRect.width)
+      // 高度只反映「窗口有多大」，不反映叠加层是否收起了窗口标题栏。
+      // 大屏预览与沉浸模式靠隐藏一体化标题栏来腾地方（index.css 里
+      // body.mo-fullscreen-preview / body.mo-immersive 两条规则），那会让本容器
+      // 临时高出标题栏那 36px。这是叠加层自己的布局变化，不是用户改了窗口大小；
+      // 一旦采纳，关闭预览时它要晚一帧（ResizeObserver → setState → 重渲染）
+      // 才回退，文件夹条与下方网格就会抖一下 —— 滚到顶部时最明显，因为不在顶部
+      // 时浏览器会自动补偿滚动位置。叠加层不透明，期间的高度本来也看不见，
+      // 故直接不采纳，关闭时高度已与状态相同，连重渲染都不会发生。
+      if (isWindowChromeHidden()) return
       setHeight(entry.contentRect.height)
     })
     observer.observe(element)
@@ -434,13 +453,18 @@ export function LocalAssetGrid({
       </div>
     </div>
   )
+  // 网格区域的外层内边距。文件夹条以下是一条硬分割线，首行贴着线会显得被压住，
+  // 故有文件夹条时补上间距（与下方 pb-4 对称）。
+  // 没有文件夹条时不补：计数条自身的 mb-1 是刻意留小的，只为避免首行卡片的
+  // focus 轮廓被遮住（见 LibraryCountBar 的组件注释），不该顺手改掉那个节奏。
+  const gridAreaClassName = folderStripHeight > 0 ? 'px-3 pb-4 pt-4' : 'px-3 pb-4'
 
   return (
     <div ref={rootRef} className="relative flex h-full min-h-0 flex-col overflow-hidden" data-local-library-guide="grid">
       <div ref={assetScrollRef} className="custom-scrollbar min-h-0 flex-1 overflow-y-auto">
         {locationHeader}
         {folderStrip}
-        <div className="px-3 pb-4">
+        <div className={gridAreaClassName}>
         {isEmpty ? (
           <div className="flex items-center justify-center px-8 py-16">
             <LibraryEmptyState

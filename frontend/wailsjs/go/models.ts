@@ -673,6 +673,66 @@ export namespace image {
 
 export namespace local_library {
 	
+	export class ImageCropRect {
+	    x: number;
+	    y: number;
+	    width: number;
+	    height: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ImageCropRect(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.x = source["x"];
+	        this.y = source["y"];
+	        this.width = source["width"];
+	        this.height = source["height"];
+	    }
+	}
+	export class ApplyImageEditInput {
+	    assetId: string;
+	    mode: string;
+	    rotation: number;
+	    angleDeg: number;
+	    flipH: boolean;
+	    flipV: boolean;
+	    crop?: ImageCropRect;
+	
+	    static createFrom(source: any = {}) {
+	        return new ApplyImageEditInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.assetId = source["assetId"];
+	        this.mode = source["mode"];
+	        this.rotation = source["rotation"];
+	        this.angleDeg = source["angleDeg"];
+	        this.flipH = source["flipH"];
+	        this.flipV = source["flipV"];
+	        this.crop = this.convertValues(source["crop"], ImageCropRect);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class AssetClipDTO {
 	    id: string;
 	    assetId: string;
@@ -1160,6 +1220,7 @@ export namespace local_library {
 	export class AssetQuery {
 	    cursor?: string;
 	    limit?: number;
+	    ids?: string[];
 	    folder?: string;
 	    directFolderOnly?: boolean;
 	    search?: string;
@@ -1206,6 +1267,7 @@ export namespace local_library {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.cursor = source["cursor"];
 	        this.limit = source["limit"];
+	        this.ids = source["ids"];
 	        this.folder = source["folder"];
 	        this.directFolderOnly = source["directFolderOnly"];
 	        this.search = source["search"];
@@ -1286,6 +1348,10 @@ export namespace local_library {
 	    // Go type: time
 	    createdAt: any;
 	    sizeBytes: number;
+	    appVersion?: string;
+	    schemaVersion?: number;
+	    assetCount?: number;
+	    note?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new BackupInfo(source);
@@ -1297,6 +1363,10 @@ export namespace local_library {
 	        this.kind = source["kind"];
 	        this.createdAt = this.convertValues(source["createdAt"], null);
 	        this.sizeBytes = source["sizeBytes"];
+	        this.appVersion = source["appVersion"];
+	        this.schemaVersion = source["schemaVersion"];
+	        this.assetCount = source["assetCount"];
+	        this.note = source["note"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1793,6 +1863,41 @@ export namespace local_library {
 		    }
 		    return a;
 		}
+	}
+	
+	export class ImageEditResult {
+	    assetId: string;
+	    relativePath: string;
+	    fileName: string;
+	    byteSize: number;
+	    modifiedAtNs: number;
+	    width: number;
+	    height: number;
+	    previewStatus: string;
+	    thumbnailUrl: string;
+	    previewUrl: string;
+	    originalUrl: string;
+	    created: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ImageEditResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.assetId = source["assetId"];
+	        this.relativePath = source["relativePath"];
+	        this.fileName = source["fileName"];
+	        this.byteSize = source["byteSize"];
+	        this.modifiedAtNs = source["modifiedAtNs"];
+	        this.width = source["width"];
+	        this.height = source["height"];
+	        this.previewStatus = source["previewStatus"];
+	        this.thumbnailUrl = source["thumbnailUrl"];
+	        this.previewUrl = source["previewUrl"];
+	        this.originalUrl = source["originalUrl"];
+	        this.created = source["created"];
+	    }
 	}
 	export class ImportResult {
 	    source: string;
@@ -3968,6 +4073,22 @@ export namespace services {
 	        this.sortOrder = source["sortOrder"];
 	    }
 	}
+	export class StorageCleanupParams {
+	    provider: string;
+	    kind?: string;
+	    keys: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new StorageCleanupParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.provider = source["provider"];
+	        this.kind = source["kind"];
+	        this.keys = source["keys"];
+	    }
+	}
 	export class StorageCleanupResult {
 	    deleted: number;
 	    failed: number;
@@ -3982,6 +4103,20 @@ export namespace services {
 	        this.deleted = source["deleted"];
 	        this.failed = source["failed"];
 	        this.errors = source["errors"];
+	    }
+	}
+	export class StorageMissingParams {
+	    kind?: string;
+	    photoIds: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new StorageMissingParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.photoIds = source["photoIds"];
 	    }
 	}
 	export class StorageObjectDTO {
@@ -4014,6 +4149,7 @@ export namespace services {
 	}
 	export class StorageScanParams {
 	    provider: string;
+	    kind?: string;
 	    status?: string;
 	    search?: string;
 	
@@ -4024,6 +4160,7 @@ export namespace services {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.provider = source["provider"];
+	        this.kind = source["kind"];
 	        this.status = source["status"];
 	        this.search = source["search"];
 	    }
@@ -4087,6 +4224,20 @@ export namespace services {
 		}
 	}
 	
+	export class StorageThumbnailParams {
+	    kind?: string;
+	    photoId: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new StorageThumbnailParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.photoId = source["photoId"];
+	    }
+	}
 	export class StoryAiModelOption {
 	    id: string;
 	    label: string;
@@ -4925,6 +5076,7 @@ export namespace storage_plugins {
 	    pluginId: string;
 	    pluginVersion?: string;
 	    vendor?: string;
+	    pluginInstalled: boolean;
 	    config?: Record<string, string>;
 	    enabled: boolean;
 	    status?: string;
@@ -4945,6 +5097,7 @@ export namespace storage_plugins {
 	        this.pluginId = source["pluginId"];
 	        this.pluginVersion = source["pluginVersion"];
 	        this.vendor = source["vendor"];
+	        this.pluginInstalled = source["pluginInstalled"];
 	        this.config = source["config"];
 	        this.enabled = source["enabled"];
 	        this.status = source["status"];
@@ -5009,6 +5162,7 @@ export namespace types {
 	    runtime?: string;
 	    pluginId?: string;
 	    local?: boolean;
+	    pluginInstalled: boolean;
 	    enabled: boolean;
 	    status?: string;
 	    lastError?: string;
@@ -5035,6 +5189,7 @@ export namespace types {
 	        this.runtime = source["runtime"];
 	        this.pluginId = source["pluginId"];
 	        this.local = source["local"];
+	        this.pluginInstalled = source["pluginInstalled"];
 	        this.enabled = source["enabled"];
 	        this.status = source["status"];
 	        this.lastError = source["lastError"];

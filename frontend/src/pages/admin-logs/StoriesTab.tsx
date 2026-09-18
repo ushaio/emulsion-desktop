@@ -6,7 +6,7 @@
 import { getEditorContent, hasEditorContent } from '@mo-gallery/api-client'
 import { convertToMilkdown } from '@mo-gallery/milkdown/migration'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { BookOpen } from 'lucide-react'
 import {
@@ -19,8 +19,10 @@ import { DraftRestoreDialog } from '@/components/admin/DraftRestoreDialog'
 import { StoryPreviewModal } from '@/components/admin/StoryPreviewModal'
 import { WechatPreviewModal } from '@/pages/admin-logs/shared/WechatPreviewModal'
 import { StoryCoverCropModal } from '@/components/admin/StoryCoverCropModal'
-import { PhotoLibraryDialog } from '@/components/zine/PhotoLibraryDialog'
+import { PhotoLibraryDialog, type LibrarySource } from '@/components/zine/PhotoLibraryDialog'
 import { StoryPhotoPanel, type PendingImage } from '@/components/admin/StoryPhotoPanel'
+import type { NarrativeMilkdownEditorHandle } from '@/components/NarrativeMilkdownEditor'
+import { releasePendingPreview, resolveLocalAssetsForUpload, toPendingImages } from '@/lib/editor-pending-import'
 import { getMilkdownPhotoIds, hasPendingMilkdownUploads } from '@mo-gallery/milkdown/media'
 import { getStoryCoverCrop, getStoryCoverPhoto, normalizeStoryCoverCrop, toStoryCoverCropValue } from '@/lib/story-cover'
 import { normalizeCompressionFormat, normalizeCompressionMode } from '@/lib/image-compress'
@@ -94,7 +96,7 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
   const [saving, setSaving] = useState(false)
   const [allPhotos, setAllPhotos] = useState<PhotoDto[]>([])
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
-  const [showMaterialLibrary, setShowMaterialLibrary] = useState(false)
+  const [materialLibrarySource, setMaterialLibrarySource] = useState<LibrarySource | null>(null)
   const [pendingCoverId, setPendingCoverId] = useState<string | null>(null)
   const [deleteStoryId, setDeleteStoryId] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState('')
@@ -111,6 +113,13 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
   const savingRef = useRef(false)
   const handledEditStoryIdRef = useRef<string | null>(null)
   const pendingPhotoIdsRef = useRef<string[] | null>(null)
+  /**
+   * 编辑器句柄由本组件持有并传给 useStoryEditorActions（两处共用同一个 ref）。
+   * 原因：上传替换正文占位发生在 handleConfirmUpload 内部，而 doSaveStory 读取的是闭包里的
+   * currentStory —— setCurrentStory 不会回溯改写**已在执行中**的闭包，若沿用闭包内容保存，
+   * 存到云端的会是替换前的占位卡。故保存时以编辑器实时内容为准。
+   */
+  const editorRef = useRef<NarrativeMilkdownEditorHandle | null>(null)
 
   const loadStories = useCallback(async () => {
     // 未连接站点：叙事列表是云端内容，跳过加载（草稿编辑不受影响）
@@ -184,6 +193,11 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
       savingRef.current = true
       setSaving(true)
       const isNew = !stories.find((story) => story.id === currentStory.id)
+      // 正文以编辑器实时内容为准，不用闭包里的 currentStory.milkContent：
+      // 上传替换正文占位发生在 handleConfirmUpload 内部，那条路径的 setCurrentStory 
+      // 不会改写本函数已经捕获的 currentStory —— 用闭包内容会把替换**前**的占位卡存进云端。
+      // （编辑器未就绪时回退到 DTO 内容，保证离线/未挂载场景仍可保存。）
+      const milkContent = editorRef.current?.getValue() ?? currentStory.milkContent ?? ''
       const basePhotoIds = currentStory.photos?.map((photo) => photo.id) || []
       const extraIds = pendingPhotoIdsRef.current || []
       const photoIdSet = new Set(basePhotoIds)
@@ -197,7 +211,7 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
         savedStory = await CreateStory({
           title: currentStory.title,
           editorType: 'milkdown',
-          milkContent: currentStory.milkContent ?? '',
+          milkContent,
           isPublished: currentStory.isPublished,
           photoIds,
           coverPhotoId: currentStory.coverPhotoId,
@@ -208,7 +222,7 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
         savedStory = await UpdateStory(currentStory.id, {
           title: currentStory.title,
           editorType: 'milkdown',
-          milkContent: currentStory.milkContent ?? '',
+          milkContent,
           isPublished: currentStory.isPublished,
           coverPhotoId: currentStory.coverPhotoId ?? null,
           coverCrop: currentStory.coverCrop ?? null,
@@ -250,7 +264,8 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
         } : latest)
         const submittedPendingIds = new Set(pendingImages.map((image) => image.id))
         setPendingImages((latest) => {
-          latest.filter((image) => submittedPendingIds.has(image.id)).forEach((image) => URL.revokeObjectURL(image.previewUrl))
+          // 本地资源库项用的是资源库缩略图 URL（非 blob:），释放函数会自行跳过
+          latest.filter((image) => submittedPendingIds.has(image.id)).forEach((image) => releasePendingPreview(image.previewUrl))
           return latest.filter((image) => !submittedPendingIds.has(image.id))
         })
         setPendingCoverId((latest) => latest === pendingCoverId ? null : latest)
@@ -274,7 +289,6 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
   }, [acceptSavedStory, currentStory, editorSessionId, initialStory, language, markDraftSynced, notify, pendingCoverId, pendingImages, rekeySavedDraft, stories, t])
 
   const {
-    editorRef,
     showUploadSettings,
     setShowUploadSettings,
     showPasteUploadSettings,
@@ -292,6 +306,7 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
     handleConfirmPasteUpload,
     handleInsertPhotoMarkdown,
     handleInsertGalleryMarkdown,
+    handleInsertPendingPlaceholder,
     restorePasteUploadSettings,
     restoreUploadSettings,
   } = useStoryEditorActions({
@@ -304,6 +319,7 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
     initialUploadSettings: DEFAULT_UPLOAD_SETTINGS,
     initialPasteUploadSettings: DEFAULT_PASTE_UPLOAD_SETTINGS,
     pendingPhotoIdsRef,
+    editorRef,
     setCurrentStory,
     setAllPhotos,
     setPendingImages,
@@ -376,7 +392,7 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
     if (editFromDraft) setEditorRevision((r) => r + 1)
   }, [editFromDraft])
 
-  const resetEditorState = useCallback(() => {    pendingImages.forEach((image) => URL.revokeObjectURL(image.previewUrl))
+  const resetEditorState = useCallback(() => {    pendingImages.forEach((image) => releasePendingPreview(image.previewUrl))
     setPendingImages([])
     setPendingCoverId(null)
     setUseCustomDate(false)
@@ -402,21 +418,29 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
       return
     }
 
-    if (hasPendingMilkdownUploads(currentStory.milkContent ?? '')) {
-      notify('请等待图片上传完成，或移除未完成的上传卡片。', 'error')
+    // 与 doSaveStory 同源：以编辑器实时内容为准，避免刚插入占位就保存时读到旧正文。
+    const milkContent = editorRef.current?.getValue() ?? currentStory.milkContent ?? ''
+
+    // 顺序很关键：待传项要**先**触发上传弹窗，不能先被下面的占位卡检查拦成报错。
+    // 用户从素材库把待传图插进正文后点保存，正文里必然有 kind='upload' 卡，
+    // 若先跑 hasPendingMilkdownUploads 就只会弹「请等待上传完成」而永远等不到上传。
+    const pendingToUpload = pendingImages.filter((image) => image.status === 'pending' || image.status === 'failed')
+    if (pendingToUpload.length > 0) {
+      setShowUploadSettings(true)
       return
     }
-    const referencedPhotoIds = getMilkdownPhotoIds(currentStory.milkContent ?? '')
+
+    // 走到这里说明已无待传项：残留的 upload 卡只可能是上传中，或上传失败后未被清掉的，
+    // 以及「待传项已被删除、正文占位还在」的孤儿卡 —— 都要求用户先处理。
+    if (hasPendingMilkdownUploads(milkContent)) {
+      notify('正文中还有未完成的图片占位，请先在素材库上传对应图片，或移除该占位卡片。', 'error')
+      return
+    }
+    const referencedPhotoIds = getMilkdownPhotoIds(milkContent)
     const availablePhotoIds = new Set((currentStory.photos || []).map((photo) => photo.id))
     const invalidPhotoIds = Array.from(referencedPhotoIds).filter((photoId) => !availablePhotoIds.has(photoId))
     if (invalidPhotoIds.length > 0) {
       notify(`正文中引用了未关联的图库图片：${invalidPhotoIds.slice(0, 3).join(', ')}`, 'error')
-      return
-    }
-
-    const pendingToUpload = pendingImages.filter((image) => image.status === 'pending' || image.status === 'failed')
-    if (pendingToUpload.length > 0) {
-      setShowUploadSettings(true)
       return
     }
 
@@ -446,37 +470,24 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
       const existingIds = new Set(prev.map((photo) => photo.id))
       return [...prev, ...importedPhotos.filter((photo) => !existingIds.has(photo.id))]
     })
-    setShowMaterialLibrary(false)
+    setMaterialLibrarySource(null)
   }, [])
 
-  // 离线素材库（本地资源库）：选中的本地图转待传图片，随草稿落盘，联网保存时再上传
+  // 本地资源库来源：解析为原生上传链路的待传项，随草稿落盘，确认上传时走 UploadLocalAsset
   const handleImportLocalMaterials = useCallback(async (assets: LocalAsset[]) => {
-    const imported: PendingImage[] = []
-    for (const asset of assets) {
-      try {
-        const response = await fetch(asset.originalUrl)
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        const blob = await response.blob()
-        if (!blob.size) throw new Error('empty file')
-        imported.push({
-          id: crypto.randomUUID(),
-          file: new File([blob], asset.fileName || `image.${asset.extension || 'jpg'}`, {
-            type: asset.mimeType || blob.type || 'image/jpeg',
-          }),
-          previewUrl: URL.createObjectURL(blob),
-          status: 'pending',
-          progress: 0,
-          takenAt: asset.capturedAt,
-          // 保留来源，上传成功后据此建立本地资源库与云端照片的关联
-          assetId: asset.id,
-        })
-      } catch (error) {
-        console.error('Failed to import local asset:', asset.fileName, error)
+    try {
+      const { resolved, failed } = await resolveLocalAssetsForUpload(assets)
+      if (failed.length > 0) {
+        console.error('Failed to resolve local assets:', failed)
+        notify(`${failed.length} 张图片无法读取，已跳过`, 'info')
       }
-    }
-    if (imported.length > 0) {
-      setPendingImages((prev) => [...prev, ...imported])
-    } else {
+      if (resolved.length === 0) {
+        notify(t('common.error'), 'error')
+        return
+      }
+      setPendingImages((prev) => [...prev, ...toPendingImages(resolved)])
+    } catch (error) {
+      console.error('Failed to import local assets:', error)
       notify(t('common.error'), 'error')
     }
   }, [notify, t])
@@ -625,6 +636,28 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
   const currentPhotoIds = currentStory?.photos?.map((photo) => photo.id) || []
   const currentCoverPhoto = currentStory ? getStoryCoverPhoto(currentStory) : null
   const currentCoverCrop = currentStory ? getStoryCoverCrop(currentStory) : null
+
+  /**
+   * 待传项 id → 本地预览图，供正文占位卡**插入后立刻回显图片**。
+   * 本地文件来源是 blob URL、资源库来源是带 session 的缩略图 URL，都只在本会话有效
+   * ⇒ 只用于渲染，绝不写进正文（正文会进草稿与云端，落盘后跨重启必裂图）。
+   */
+  const pendingPreviews = useMemo(() => {
+    const previews = new Map<string, string>()
+    for (const image of pendingImages) {
+      if (image.previewUrl) previews.set(image.id, image.previewUrl)
+    }
+    return previews
+  }, [pendingImages])
+
+  /**
+   * 预览表变化时通知编辑器重渲染既有媒体卡（不修改文档）。
+   * 必要性：草稿恢复时缩略图是**异步**按 assetId 现取回来的，贴回待传项后
+   * 正文里已存在的占位卡不会自己重画 —— 必须主动触发一次，否则那批卡片一直停在文字占位。
+   */
+  useEffect(() => {
+    editorRef.current?.refreshUploadPreviews()
+  }, [pendingPreviews])
 
   const handlePrevPhoto = useCallback(() => {
     if (previewPhotoIndex === null || !currentStory?.photos) return
@@ -780,10 +813,12 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
             openMenuPendingId={openMenuPendingId}
             t={t}
             notify={notify}
-            onAddPhotos={() => setShowMaterialLibrary(true)}
+            onAddPhotos={() => setMaterialLibrarySource(token ? 'cloud' : 'local-library')}
             onInsertPhotoMarkdown={handleInsertPhotoMarkdown}
             onInsertGalleryMarkdown={handleInsertGalleryMarkdown}
+            onInsertPendingPlaceholder={handleInsertPendingPlaceholder}
             onOpenPasteUploadSettings={() => setShowPasteUploadSettings(true)}
+            onUploadPending={() => setShowUploadSettings(true)}
             onRemovePhoto={handleRemovePhoto}
             onRemovePendingImage={handleRemovePendingImage}
             onSetCover={handleSetCover}
@@ -813,6 +848,7 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
           editorRevision={editorRevision}
           pendingImages={pendingImages}
           pendingCoverId={pendingCoverId}
+          pendingPreviews={pendingPreviews}
           saving={saving}
           saveTitle={token ? undefined : t('admin.save_offline_hint')}
           draftSaved={draftSaved}
@@ -842,7 +878,7 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
           onSave={() => void handleSaveStory()}
           onConvertToMilkdown={handleConvertToMilkdown}
           onPasteFiles={handlePasteFiles}
-          onOpenMaterialLibrary={() => setShowMaterialLibrary(true)}
+          onOpenMaterialLibrary={() => setMaterialLibrarySource(token ? 'cloud' : 'local-library')}
           onInsertPhotoMarkdown={handleInsertPhotoMarkdown}
           onInsertGalleryMarkdown={handleInsertGalleryMarkdown}
           onOpenPasteUploadSettings={() => setShowPasteUploadSettings(true)}
@@ -883,21 +919,17 @@ export function StoriesTab({ token, t, notify, editStoryId, editSource = 'prompt
       </div>
 
 
-      {/* 素材库：已连接站点用云端资源库；未连接时只能选本地资源库 */}
-      {token ? (
-        <PhotoLibraryDialog
-          source={showMaterialLibrary ? 'cloud' : null}
-          existingPhotoIds={currentPhotoIds}
-          onClose={() => setShowMaterialLibrary(false)}
-          onImportPhotos={handleImportMaterials}
-        />
-      ) : (
-        <PhotoLibraryDialog
-          source={showMaterialLibrary ? 'local-library' : null}
-          onClose={() => setShowMaterialLibrary(false)}
-          onImportLocalAssets={(assets) => void handleImportLocalMaterials(assets)}
-        />
-      )}
+      {/* 素材库：云端与本地资源库两个入口并存，弹窗内切换。
+          云端需连接站点；本地资源库任意时刻可用（离线也能选图）。 */}
+      <PhotoLibraryDialog
+        source={materialLibrarySource}
+        sources={token ? ['cloud', 'local-library'] : ['local-library']}
+        onSourceChange={setMaterialLibrarySource}
+        existingPhotoIds={currentPhotoIds}
+        onClose={() => setMaterialLibrarySource(null)}
+        onImportPhotos={handleImportMaterials}
+        onImportLocalAssets={(assets) => void handleImportLocalMaterials(assets)}
+      />
       <ImageUploadSettingsModal isOpen={showUploadSettings} onClose={() => setShowUploadSettings(false)} onConfirm={handleConfirmUpload} pendingCount={pendingImages.filter((image) => image.status === 'pending' || image.status === 'failed').length} t={t} token={token} initialSettings={uploadSettings} settings={settings} tags={tags} currentStoryId={currentStory?.id} />
       <ImageUploadSettingsModal
         isOpen={showPasteUploadSettings}

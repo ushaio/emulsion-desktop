@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -24,6 +25,7 @@ import (
 	avifcodec "github.com/gen2brain/avif"
 	heiccodec "github.com/gen2brain/heic"
 	"github.com/rwcarlsen/goexif/exif"
+	bmpcodec "golang.org/x/image/bmp"
 	xdraw "golang.org/x/image/draw"
 	_ "golang.org/x/image/tiff"
 	_ "golang.org/x/image/webp"
@@ -33,6 +35,10 @@ const (
 	mediaHeaderBytes           = 64
 	maxDecodeBytes             = 256 * 1024 * 1024
 	maxRAWPreviewScanBytes     = 64 * 1024 * 1024
+	maxEmbeddedPreviewBytes    = 64 * 1024 * 1024
+	maxTIFFDirectories         = 32
+	maxTIFFDirectoryEntries    = 512
+	maxEmbeddedPreviewStrips   = 64
 	maxImagePixels             = 180_000_000
 	maxOriginalViewPixels      = 100_000_000
 	maxOriginalViewMemoryBytes = 512 * 1024 * 1024
@@ -43,9 +49,9 @@ const (
 )
 
 var supportedExtensions = map[string]struct{}{
-	".jpg": {}, ".jpeg": {}, ".png": {}, ".webp": {}, ".gif": {}, ".avif": {},
+	".jpg": {}, ".jpeg": {}, ".png": {}, ".bmp": {}, ".webp": {}, ".gif": {}, ".avif": {},
 	".heic": {}, ".heif": {}, ".tif": {}, ".tiff": {}, ".cr2": {}, ".cr3": {},
-	".nef": {}, ".arw": {}, ".dng": {}, ".raf": {}, ".rw2": {},
+	".nef": {}, ".arw": {}, ".dng": {}, ".raf": {}, ".rw2": {}, ".3fr": {},
 }
 
 // videoExtensions and audioExtensions are the time-based media the library can
@@ -133,6 +139,8 @@ func formatForExtension(ext string) (string, string) {
 		return "jpeg", "image/jpeg"
 	case ".png":
 		return "png", "image/png"
+	case ".bmp":
+		return "bmp", "image/bmp"
 	case ".webp":
 		return "webp", "image/webp"
 	case ".gif":
@@ -157,6 +165,8 @@ func formatForExtension(ext string) (string, string) {
 		return "raf", "image/x-fuji-raf"
 	case ".rw2":
 		return "rw2", "image/x-panasonic-rw2"
+	case ".3fr":
+		return "3fr", "image/x-hasselblad-3fr"
 	case ".mp4":
 		return "mp4", "video/mp4"
 	case ".mov":
@@ -187,6 +197,8 @@ func formatAndMIME(format string) (string, string) {
 		return "jpeg", "image/jpeg"
 	case "png":
 		return "png", "image/png"
+	case "bmp":
+		return "bmp", "image/bmp"
 	case "webp":
 		return "webp", "image/webp"
 	case "gif":
@@ -211,6 +223,8 @@ func formatAndMIME(format string) (string, string) {
 		return "raf", "image/x-fuji-raf"
 	case "rw2":
 		return "rw2", "image/x-panasonic-rw2"
+	case "3fr":
+		return "3fr", "image/x-hasselblad-3fr"
 	case "mp4":
 		return "mp4", "video/mp4"
 	case "mov":
@@ -345,6 +359,9 @@ func detectMediaHeader(header []byte, ext string) (string, string, bool) {
 	if len(header) >= 12 && string(header[:4]) == "RIFF" && string(header[8:12]) == "WEBP" {
 		return "webp", "image/webp", true
 	}
+	if isBMPHeader(header) {
+		return "bmp", "image/bmp", true
+	}
 	if len(header) >= 16 && string(header[:16]) == "FUJIFILMCCD-RAW " {
 		return "raf", "image/x-fuji-raf", true
 	}
@@ -356,7 +373,10 @@ func detectMediaHeader(header []byte, ext string) (string, string, bool) {
 			return "cr2", "image/x-canon-cr2", true
 		}
 		switch strings.ToLower(ext) {
-		case ".dng", ".nef", ".arw", ".rw2":
+		// 3FR is Hasselblad's TIFF-based RAW container: the header is an
+		// ordinary TIFF one, so only the extension tells it apart from a
+		// plain .tif.
+		case ".dng", ".nef", ".arw", ".rw2", ".3fr":
 			format, mimeType := formatForExtension(ext)
 			return format, mimeType, true
 		default:
@@ -390,6 +410,26 @@ func detectMediaHeader(header []byte, ext string) (string, string, bool) {
 
 func isTIFFHeader(header []byte) bool {
 	return len(header) >= 4 && (string(header[:4]) == "II\x2a\x00" || string(header[:4]) == "MM\x00\x2a")
+}
+
+// isBMPHeader reports whether header opens a BMP the decoder can actually read.
+// The "BM" signature is only two bytes, so what keeps a random file from being
+// claimed as a bitmap is the DIB header length: golang.org/x/image/bmp accepts
+// BITMAPINFOHEADER (40), BITMAPV4HEADER (108) and BITMAPV5HEADER (124) only.
+// This is deliberately looser than the magic image.Decode registers for BMP
+// ("BM????\x00\x00\x00\x00"), which also demands a zeroed reserved field and so
+// misses files that some encoders write — decodeImage calls the codec directly
+// for exactly that reason.
+func isBMPHeader(header []byte) bool {
+	if len(header) < 18 || header[0] != 'B' || header[1] != 'M' {
+		return false
+	}
+	dibHeaderLen := uint32(header[14]) | uint32(header[15])<<8 | uint32(header[16])<<16 | uint32(header[17])<<24
+	switch dibHeaderLen {
+	case 40, 108, 124:
+		return true
+	}
+	return false
 }
 
 func validateDimensions(width, height int) error {
@@ -492,11 +532,11 @@ func skipGIFSubBlocks(reader *bufio.Reader) error {
 
 func supportsEXIFInspection(format, ext string) bool {
 	switch format {
-	case "jpeg", "tiff", "cr2", "dng", "nef", "arw", "rw2":
+	case "jpeg", "tiff", "cr2", "dng", "nef", "arw", "rw2", "3fr":
 		return true
 	}
 	switch strings.ToLower(ext) {
-	case ".jpg", ".jpeg", ".tif", ".tiff", ".cr2", ".dng", ".nef", ".arw", ".rw2":
+	case ".jpg", ".jpeg", ".tif", ".tiff", ".cr2", ".dng", ".nef", ".arw", ".rw2", ".3fr":
 		return true
 	}
 	return false
@@ -875,6 +915,11 @@ func decodeImage(path string) (image.Image, error) {
 		return avifcodec.Decode(io.LimitReader(file, maxDecodeBytes))
 	case "heic", "heif":
 		return heiccodec.Decode(io.LimitReader(file, maxDecodeBytes))
+	case "bmp":
+		// Called directly rather than through image.Decode: the registered BMP
+		// magic also requires a zeroed reserved field, and the format has
+		// already been established above.
+		return bmpcodec.Decode(io.LimitReader(file, maxDecodeBytes))
 	}
 	source, _, err := image.Decode(io.LimitReader(file, maxDecodeBytes))
 	return source, err
@@ -913,6 +958,9 @@ func decodeMediaConfigReaderContext(ctx context.Context, source io.Reader, forma
 	case "heic", "heif":
 		config, err := heiccodec.DecodeConfig(io.LimitReader(reader, maxDecodeBytes))
 		return config, "heif", err
+	case "bmp":
+		config, err := bmpcodec.DecodeConfig(io.LimitReader(reader, maxDecodeBytes))
+		return config, "bmp", err
 	}
 	return image.DecodeConfig(io.LimitReader(reader, maxDecodeBytes))
 }
@@ -925,7 +973,7 @@ func decodeImageConfig(path string) (image.Config, error) {
 
 func isRAWExtension(ext string) bool {
 	switch strings.ToLower(ext) {
-	case ".cr2", ".cr3", ".nef", ".arw", ".dng", ".raf", ".rw2":
+	case ".cr2", ".cr3", ".nef", ".arw", ".dng", ".raf", ".rw2", ".3fr":
 		return true
 	}
 	return false
@@ -933,7 +981,7 @@ func isRAWExtension(ext string) bool {
 
 func isRAWFormat(format string) bool {
 	switch strings.ToLower(format) {
-	case "cr2", "cr3", "nef", "arw", "dng", "raf", "rw2":
+	case "cr2", "cr3", "nef", "arw", "dng", "raf", "rw2", "3fr":
 		return true
 	}
 	return false
@@ -969,7 +1017,477 @@ func extractRAWPreviewContext(ctx context.Context, path string) ([]byte, error) 
 			return nil, err
 		}
 	}
-	return largestEmbeddedJPEGWithValidatorContext(ctx, file, maxRAWPreviewScanBytes, validateDimensions)
+	return embeddedRAWPreview(ctx, file)
+}
+
+// embeddedRAWPreview returns the JPEG preview embedded in a RAW container,
+// looking where the container says it is before falling back to a blind scan.
+//
+// The TIFF-based containers (DNG, NEF, ARW, RW2, 3FR, ...) record where their
+// preview lives in an IFD, and that is the only reliable way to find it in a
+// large file: Hasselblad's 3FR in particular parks its preview in the last
+// couple of megabytes behind ~200 MB of uncompressed sensor data, which the
+// fixed-size scan below can never reach.
+//
+// The scan is only merged in when it can read the whole file, because only then
+// is it exhaustive. That preserves the old behaviour exactly for the files the
+// old code handled — where "the largest JPEG in the first 64 MB" was the answer —
+// while a file too large to scan falls back to the pointers, which is strictly
+// better than the failure it used to produce.
+func embeddedRAWPreview(ctx context.Context, file *os.File) ([]byte, error) {
+	return embeddedRAWPreviewWithValidator(ctx, file, validateDimensions)
+}
+
+// embeddedRAWPreviewWithValidator is embeddedRAWPreview with a caller-supplied
+// size policy: the inspector accepts anything decodable, while the
+// full-resolution viewer applies its own stricter pixel and memory limits.
+func embeddedRAWPreviewWithValidator(ctx context.Context, file *os.File, validate func(int, int) error) ([]byte, error) {
+	fileSize, err := readableSize(file)
+	if err != nil {
+		return nil, err
+	}
+	candidates, err := tiffEmbeddedJPEGs(ctx, file)
+	if err != nil {
+		return nil, err
+	}
+	best, bestArea := largestUsableJPEG(ctx, candidates, validate)
+
+	var scanErr error
+	scanIsExhaustive := fileSize <= maxRAWPreviewScanBytes
+	if scanIsExhaustive {
+		if _, seekErr := file.Seek(0, io.SeekStart); seekErr != nil {
+			return nil, seekErr
+		}
+		scanned, err := largestEmbeddedJPEGWithValidatorContext(ctx, file, maxRAWPreviewScanBytes, validate)
+		scanErr = err
+		if err == nil {
+			if config, configErr := jpeg.DecodeConfig(contextBoundReader{ctx: ctx, reader: bytes.NewReader(scanned)}); configErr == nil {
+				if area := int64(config.Width) * int64(config.Height); area > bestArea {
+					best = scanned
+				}
+			}
+		}
+	}
+	if best != nil {
+		return best, nil
+	}
+	if len(candidates) > 0 {
+		// The container pointed at a preview, but it did not decode; saying so
+		// is more useful than the scan's size message, which would misdescribe
+		// a file that was scanned in full.
+		return nil, fmt.Errorf("RAW embedded preview is not decodable")
+	}
+	if scanErr != nil {
+		return nil, scanErr
+	}
+	if scanIsExhaustive {
+		return nil, fmt.Errorf("RAW contains no decodable embedded JPEG preview")
+	}
+	return nil, fmt.Errorf("RAW exceeds preview scan limit")
+}
+
+// tiffEmbeddedJPEGs follows the IFD chain and the sub-IFDs of a TIFF-based
+// container and returns every byte range that is declared to hold a JPEG.
+//
+// Only the pointers are trusted, never the declared lengths: cameras are
+// inconsistent about StripByteCounts/JPEGInterchangeFormatLength (and some
+// write more than one IMAGE_LENGTH), so each range is re-parsed through the
+// JPEG marker chain to find its real end. A range that does not begin with an
+// SOI marker is skipped, which is what keeps the uncompressed sensor strips of
+// a 3FR from being mistaken for a preview.
+func tiffEmbeddedJPEGs(ctx context.Context, file *os.File) ([][]byte, error) {
+	fileSize, err := readableSize(file)
+	if err != nil {
+		return nil, err
+	}
+	header := make([]byte, 8)
+	if _, err := file.ReadAt(header, 0); err != nil {
+		return nil, nil
+	}
+	var order binary.ByteOrder
+	switch string(header[:2]) {
+	case "II":
+		order = binary.LittleEndian
+	case "MM":
+		order = binary.BigEndian
+	default:
+		return nil, nil
+	}
+	if order.Uint16(header[2:4]) != 0x002A {
+		return nil, nil
+	}
+	visited := make(map[uint32]struct{})
+	pending := []uint32{order.Uint32(header[4:8])}
+	var previews [][]byte
+	for len(pending) > 0 && len(visited) < maxTIFFDirectories {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		offset := pending[0]
+		pending = pending[1:]
+		if offset < 8 || int64(offset)+2 > fileSize {
+			continue
+		}
+		if _, seen := visited[offset]; seen {
+			continue
+		}
+		visited[offset] = struct{}{}
+		fields, next, readErr := readTIFFDirectory(file, order, offset, fileSize)
+		if readErr != nil {
+			continue
+		}
+		if next > 0 {
+			pending = append(pending, next)
+		}
+		for _, field := range fields {
+			switch field.tag {
+			case tiffTagSubIFDs, tiffTagExifIFD, tiffTagGPSIFD:
+				// Sub-IFD pointers are SINGLE values, so a malformed count
+				// cannot make this walk hundreds of bogus directories.
+				pending = append(pending, numericValues(file, order, field, 1)...)
+			case tiffTagStripOffsets, tiffTagTileOffsets, tiffTagJPEGOffset:
+				previews = append(previews, readJPEGRanges(ctx, file, order, field, fields, fileSize)...)
+			}
+		}
+	}
+	return previews, nil
+}
+
+// readJPEGRanges resolves one offset field into the JPEG previews it points at.
+//
+// Strip/tile offsets are arrays, and a preview may be split across several
+// consecutive strips. Runs of contiguous strips are therefore merged back into
+// one range before being read, while a non-contiguous layout falls back to the
+// first pointer alone. The SOI check in readJPEGAt is what makes this safe for
+// the other arrays sharing the same two tags: uncompressed sensor strips do not
+// start with 0xFFD8FF, so they are rejected before a single byte is buffered.
+func readJPEGRanges(ctx context.Context, file *os.File, order binary.ByteOrder, offsets tiffField, fields []tiffField, fileSize int64) [][]byte {
+	var lengthTag uint16 = tiffTagStripByteCounts
+	switch offsets.tag {
+	case tiffTagTileOffsets:
+		lengthTag = tiffTagTileByteCounts
+	case tiffTagJPEGOffset:
+		lengthTag = tiffTagJPEGLength
+	}
+	declared := declaredLengthFor(file, order, fields, lengthTag)
+	values := numericValues(file, order, offsets, maxEmbeddedPreviewStrips)
+	if len(values) == 0 {
+		return nil
+	}
+	start, total := int64(values[0]), int64(0)
+	if len(declared) > 0 {
+		total = declared[0]
+	}
+	var previews [][]byte
+	flush := func() {
+		if preview, readErr := readJPEGAt(ctx, file, start, total, fileSize); readErr == nil && preview != nil {
+			previews = append(previews, preview)
+		}
+	}
+	for index := 1; index < len(values); index++ {
+		previousEnd := start + total
+		next := int64(values[index])
+		// Only a run that actually continues the range is merged; anything else
+		// starts a fresh one, capped so a corrupt count cannot make this walk a
+		// whole directory of strips.
+		if total > 0 && next == previousEnd && len(previews) < maxEmbeddedPreviewStrips {
+			nextLength := int64(0)
+			if index < len(declared) {
+				nextLength = declared[index]
+			}
+			total += nextLength
+			continue
+		}
+		flush()
+		start = next
+		total = 0
+		if index < len(declared) {
+			total = declared[index]
+		}
+	}
+	flush()
+	return previews
+}
+
+func declaredLengthFor(file *os.File, order binary.ByteOrder, fields []tiffField, tag uint16) []int64 {
+	for _, field := range fields {
+		if field.tag != tag {
+			continue
+		}
+		values := numericValues(file, order, field, maxTIFFDirectoryEntries)
+		lengths := make([]int64, 0, len(values))
+		for _, value := range values {
+			lengths = append(lengths, int64(value))
+		}
+		return lengths
+	}
+	return nil
+}
+
+// largestUsableJPEG decodes the header of every candidate and returns the one
+// with the largest area, matching the "biggest embedded preview" policy the
+// blind scan has always applied.
+func largestUsableJPEG(ctx context.Context, candidates [][]byte, validate func(int, int) error) ([]byte, int64) {
+	var best []byte
+	var bestArea int64
+	for _, candidate := range candidates {
+		if ctx.Err() != nil {
+			return best, bestArea
+		}
+		config, configErr := jpeg.DecodeConfig(contextBoundReader{ctx: ctx, reader: bytes.NewReader(candidate)})
+		if configErr != nil || validate(config.Width, config.Height) != nil {
+			continue
+		}
+		area := int64(config.Width) * int64(config.Height)
+		if area > bestArea {
+			bestArea, best = area, candidate
+		}
+	}
+	return best, bestArea
+}
+
+// readJPEGAt reads the JPEG that starts at offset. The declared length only
+// bounds how much is read up front; the payload is trimmed to the real EOI so a
+// camera that overstates its preview size cannot pull the following sensor data
+// into the value handed to the decoder.
+func readJPEGAt(ctx context.Context, file *os.File, offset, declaredLength, fileSize int64) ([]byte, error) {
+	if offset < 0 || offset+3 > fileSize {
+		return nil, nil
+	}
+	probe := make([]byte, 3)
+	if _, err := file.ReadAt(probe, offset); err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(probe, []byte{0xFF, 0xD8, 0xFF}) {
+		return nil, nil
+	}
+	available := fileSize - offset
+	readSize := available
+	if declaredLength > 0 && declaredLength < readSize {
+		readSize = declaredLength
+	}
+	if readSize > maxEmbeddedPreviewBytes {
+		readSize = maxEmbeddedPreviewBytes
+	}
+	payload := make([]byte, readSize)
+	read, err := file.ReadAt(payload, offset)
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	payload = payload[:read]
+	end, err := jpegEndOffset(payload)
+	if err != nil {
+		return nil, err
+	}
+	if end <= 0 {
+		return nil, nil
+	}
+	return payload[:end], nil
+}
+
+// jpegEndOffset walks the JPEG marker chain and returns the offset just past the
+// EOI marker. Scanning for the raw 0xFFD9 pair instead would be wrong: those two
+// bytes occur inside entropy-coded scan data, so the first match can cut a
+// preview in half.
+func jpegEndOffset(data []byte) (int, error) {
+	if len(data) < 4 || data[0] != 0xFF || data[1] != 0xD8 {
+		return 0, nil
+	}
+	for index := 2; index+1 < len(data); {
+		if data[index] != 0xFF {
+			index++
+			continue
+		}
+		marker := data[index+1]
+		switch {
+		case marker == 0xFF:
+			index++
+			continue
+		case marker == 0x01 || (marker >= 0xD0 && marker <= 0xD8):
+			index += 2
+			continue
+		case marker == 0xD9:
+			return index + 2, nil
+		case marker == 0xDA:
+			// Start of scan: entropy-coded data runs until the next marker that
+			// is not a stuffed 0xFF00 or a restart marker.
+			index += 2
+			for index+1 < len(data) {
+				if data[index] != 0xFF {
+					index++
+					continue
+				}
+				next := data[index+1]
+				if next == 0x00 || next == 0xFF || (next >= 0xD0 && next <= 0xD7) {
+					index += 2
+					continue
+				}
+				break
+			}
+		default:
+			if index+3 >= len(data) {
+				return 0, nil
+			}
+			segmentLength := int(binary.BigEndian.Uint16(data[index+2 : index+4]))
+			if segmentLength < 2 {
+				return 0, nil
+			}
+			index += 2 + segmentLength
+		}
+	}
+	return 0, nil
+}
+
+func readableSize(file *os.File) (int64, error) {
+	info, err := file.Stat()
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
+}
+
+// TIFF tags this build follows. Only the pointer-bearing ones are needed: the
+// preview is located, not interpreted.
+const (
+	tiffTagStripOffsets     = 0x0111
+	tiffTagStripByteCounts  = 0x0117
+	tiffTagTileOffsets      = 0x0144
+	tiffTagTileByteCounts   = 0x0145
+	tiffTagJPEGOffset       = 0x0201
+	tiffTagJPEGLength       = 0x0202
+	tiffTagSubIFDs          = 0x014A
+	tiffTagExifIFD          = 0x8769
+	tiffTagGPSIFD           = 0x8825
+	tiffInlineValueCapacity = 4
+)
+
+// TIFF field types, as numbered by the specification. The widths are what decides
+// whether a value sits inline or behind a pointer, so every type the walk may
+// encounter has to be classified even though only the integer ones are read.
+const (
+	tiffTypeByte      = 1
+	tiffTypeASCII     = 2
+	tiffTypeShort     = 3
+	tiffTypeLong      = 4
+	tiffTypeRational  = 5
+	tiffTypeSByte     = 6
+	tiffTypeUndefined = 7
+	tiffTypeSShort    = 8
+	tiffTypeSLong     = 9
+	tiffTypeSRational = 10
+	tiffTypeFloat     = 11
+	tiffTypeDouble    = 12
+)
+
+// tiffField is one IFD entry. raw holds the four inline bytes or the offset of
+// the out-of-line payload, depending on how much the declared type needs.
+type tiffField struct {
+	tag    uint16
+	kind   uint16
+	count  uint32
+	raw    [4]byte
+	inline bool
+}
+
+// tiffTypeSize returns the byte width of one value of the given TIFF type. Zero
+// means the type is unknown to this build, which makes the field unusable.
+func tiffTypeSize(kind uint16) int {
+	switch kind {
+	case tiffTypeByte, tiffTypeASCII, tiffTypeSByte, tiffTypeUndefined:
+		return 1
+	case tiffTypeShort, tiffTypeSShort:
+		return 2
+	case tiffTypeLong, tiffTypeSLong, tiffTypeFloat:
+		return 4
+	case tiffTypeRational, tiffTypeSRational, tiffTypeDouble:
+		return 8
+	}
+	return 0
+}
+
+// numericValues resolves up to maxValues integers of the field, reading the
+// out-of-line payload when the declared type is wider than the four inline
+// bytes. Rationals and floats yield nothing: no pointer tag uses them, and
+// reinterpreting their bytes as an offset would point at random data.
+func numericValues(file *os.File, order binary.ByteOrder, field tiffField, maxValues int) []uint32 {
+	size := tiffTypeSize(field.kind)
+	if size == 0 || field.count == 0 {
+		return nil
+	}
+	switch field.kind {
+	case tiffTypeRational, tiffTypeSRational, tiffTypeFloat, tiffTypeDouble:
+		return nil
+	}
+	count := int(field.count)
+	if count > maxValues {
+		count = maxValues
+	}
+	payload := field.raw[:]
+	if !field.inline {
+		payload = make([]byte, count*size)
+		if _, err := file.ReadAt(payload, int64(field.payloadOffset(order))); err != nil {
+			return nil
+		}
+	} else if count*size > len(payload) {
+		count = len(payload) / size
+	}
+	values := make([]uint32, 0, count)
+	for index := 0; index < count; index++ {
+		chunk := payload[index*size : index*size+size]
+		switch field.kind {
+		case tiffTypeByte, tiffTypeASCII, tiffTypeSByte, tiffTypeUndefined:
+			values = append(values, uint32(chunk[0]))
+		case tiffTypeShort, tiffTypeSShort:
+			values = append(values, uint32(order.Uint16(chunk)))
+		default:
+			values = append(values, order.Uint32(chunk))
+		}
+	}
+	return values
+}
+
+// tiffFieldOffset returns where the field's payload lives when it does not fit
+// in the four inline bytes.
+func (field tiffField) payloadOffset(order binary.ByteOrder) uint32 {
+	return order.Uint32(field.raw[0:4])
+}
+
+// readTIFFDirectory reads one IFD: the entry count, the entries, and the offset
+// of the next directory. A container that lies about its entry count is cut off
+// at maxTIFFDirectoryEntries instead of being allowed to allocate on demand.
+func readTIFFDirectory(file *os.File, order binary.ByteOrder, offset uint32, fileSize int64) ([]tiffField, uint32, error) {
+	countBytes := make([]byte, 2)
+	if _, err := file.ReadAt(countBytes, int64(offset)); err != nil {
+		return nil, 0, err
+	}
+	count := int(order.Uint16(countBytes))
+	if count == 0 {
+		return nil, 0, nil
+	}
+	if count > maxTIFFDirectoryEntries {
+		count = maxTIFFDirectoryEntries
+	}
+	payload := make([]byte, count*12)
+	if _, err := file.ReadAt(payload, int64(offset)+2); err != nil {
+		return nil, 0, err
+	}
+	fields := make([]tiffField, 0, count)
+	for index := 0; index < count; index++ {
+		chunk := payload[index*12 : index*12+12]
+		field := tiffField{
+			tag:   order.Uint16(chunk[0:2]),
+			kind:  order.Uint16(chunk[2:4]),
+			count: order.Uint32(chunk[4:8]),
+		}
+		copy(field.raw[:], chunk[8:12])
+		field.inline = int64(field.count)*int64(tiffTypeSize(field.kind)) <= tiffInlineValueCapacity
+		fields = append(fields, field)
+	}
+	nextBytes := make([]byte, 4)
+	if _, err := file.ReadAt(nextBytes, int64(offset)+2+int64(count)*12); err != nil {
+		return fields, 0, nil
+	}
+	return fields, order.Uint32(nextBytes), nil
 }
 
 type contextBoundReader struct {

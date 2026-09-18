@@ -22,6 +22,11 @@ export interface SegmentedTabOption<T extends string = string> {
   /** 标签右侧附加节点；传入函数时以选中态作为参数（如随选中变色的徽标） */
   trailing?: ReactNode | ((active: boolean) => ReactNode)
   title?: string
+  /**
+   * 该项当前不可选。用于「该分组下没有任何可用内容」这类情形：置灰比允许点击
+   * 却毫无反应更诚实，且配合 title 能说明原因。键盘导航会跳过它。
+   */
+  disabled?: boolean
 }
 
 interface SegmentedTabsProps<T extends string = string> {
@@ -65,12 +70,13 @@ export function SegmentedTabs<T extends string = string>({
       )}
     >
       {glass && <GlassBackdrop />}
-      {options.map(({ value: optionValue, label, icon: Icon, trailing, title }) => {
+      {options.map(({ value: optionValue, label, icon: Icon, trailing, title, disabled }) => {
         const active = optionValue === value
         return (
           <button
             key={optionValue}
             type="button"
+            disabled={disabled}
             role={semantic === 'radio' ? 'radio' : 'tab'}
             {...(semantic === 'radio'
               ? { 'aria-checked': active }
@@ -84,6 +90,8 @@ export function SegmentedTabs<T extends string = string>({
                 : ['ArrowRight', 'ArrowDown'].includes(event.key) ? (index + 1) % options.length
                   : ['ArrowLeft', 'ArrowUp'].includes(event.key) ? (index - 1 + options.length) % options.length : -1
               if (next < 0) return
+              // 落在禁用项上就停住，不绕回去：跳到别的分组会让方向键的行为难以预测。
+              if (options[next]?.disabled) return
               event.preventDefault()
               onChange(options[next].value)
               const buttons = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(':scope > button')
@@ -92,7 +100,7 @@ export function SegmentedTabs<T extends string = string>({
             title={title}
             {...itemAttributes?.(optionValue)}
             className={cn(
-              'flex min-w-0 items-center justify-center rounded font-medium transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+              'flex min-w-0 items-center justify-center rounded font-medium transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent',
               isLarge ? 'h-8 gap-2 px-3 text-xs' : 'h-7 gap-1.5 px-2.5 text-[11px]',
               fill && 'min-w-0 flex-1',
             )}

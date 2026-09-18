@@ -23,7 +23,8 @@ func (a *App) GetStorageSources() ([]types.StorageSourceDTO, error) {
 		result = append(result, types.StorageSourceDTO{
 			ID: source.ID, Name: source.Name, Type: source.PluginID,
 			Runtime: storage_plugins.RuntimeDesktopPlugin, PluginID: source.PluginID,
-			Enabled: source.Enabled, Status: source.Status, LastError: source.LastError,
+			PluginInstalled: source.PluginInstalled,
+			Enabled:         source.Enabled, Status: source.Status, LastError: source.LastError,
 			Bucket: stringPointer(config["bucket"]), Region: stringPointer(config["region"]),
 			Endpoint: stringPointer(config["endpoint"]), PublicURL: stringPointer(firstConfigValue(config, "publicURL", "publicUrl")),
 			BasePath: stringPointer(config["basePath"]), Branch: stringPointer(config["branch"]),
@@ -49,11 +50,31 @@ func firstConfigValue(config map[string]string, keys ...string) string {
 	}
 	return ""
 }
+// GetDesktopStorageSources returns the plugin sources that are actually usable.
+//
+// Uninstalling a plugin deliberately keeps its source records so reinstalling
+// restores the configuration, which means the registry can hold sources whose
+// plugin is gone. Those cannot list objects, upload, or move — every operation
+// fails in commandFor — so exposing them here produced dead entries: storage
+// maintenance rendered a source tab that could only ever error, and cloud
+// photos offered a "move to" target that could not accept a move.
+//
+// Sources without their plugin stay visible in Settings (via GetStorageSources)
+// so they can be reinstalled or deleted; they are only hidden where a working
+// source is required.
 func (a *App) GetDesktopStorageSources() []storage_plugins.SourceDTO {
 	if a.StoragePlugins == nil {
 		return []storage_plugins.SourceDTO{}
 	}
-	return a.StoragePlugins.ListSources()
+	sources := a.StoragePlugins.ListSources()
+	result := make([]storage_plugins.SourceDTO, 0, len(sources))
+	for _, source := range sources {
+		if !source.PluginInstalled {
+			continue
+		}
+		result = append(result, source)
+	}
+	return result
 }
 
 // GetDesktopStorageSourceCredentials reads credentials only when the user
@@ -262,47 +283,80 @@ func (a *App) TestDesktopStorageSource(sourceID string) (storage_plugins.HealthR
 
 // ─── Storage Scan/Cleanup ─────────────────────────────
 //
-// Storage maintenance is driven entirely by the desktop storage plugins: the
-// object listing comes from the plugin runtime and the ownership records come
-// from the local library's cloud projection. Nothing here forwards to the web
-// admin API, so the page works without a server connection.
+// The storage maintenance page lists two kinds of source and routes each one to
+// its own backend:
+//
+//   - Desktop plugin sources are reconciled locally: the object listing comes
+//     from the plugin runtime and the ownership records come from the local
+//     library's cloud projection. These work offline.
+//   - Server sources (builtin local / s3 / github, plus server-side
+//     StorageSource rows) are administered over the authenticated proxy. The
+//     Desktop holds no credentials for them by design, so they cannot take the
+//     plugin path.
+//
+// params.Kind selects the backend; an absent Kind means plugin, which keeps
+// older callers working.
+
+func (a *App) storageContext() context.Context {
+	if a.ctx != nil {
+		return a.ctx
+	}
+	return context.Background()
+}
 
 func (a *App) ScanStorage(params services.StorageScanParams) (*services.StorageScanResult, error) {
+	if params.Kind == services.StorageKindWeb {
+		if a.StorageWebService == nil {
+			return nil, errors.New("服务器存储服务未初始化")
+		}
+		return a.StorageWebService.Scan(params)
+	}
 	if a.StorageMaintenance == nil {
 		return nil, errors.New("存储整理服务未初始化")
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return a.StorageMaintenance.Scan(ctx, params.Provider)
+	return a.StorageMaintenance.Scan(a.storageContext(), params.Provider)
 }
 
-func (a *App) CleanupStorage(keys []string, provider string) (*services.StorageCleanupResult, error) {
+func (a *App) CleanupStorage(params services.StorageCleanupParams) (*services.StorageCleanupResult, error) {
+	if params.Kind == services.StorageKindWeb {
+		if a.StorageWebService == nil {
+			return nil, errors.New("服务器存储服务未初始化")
+		}
+		return a.StorageWebService.Cleanup(params)
+	}
 	if a.StorageMaintenance == nil {
 		return nil, errors.New("存储整理服务未初始化")
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return a.StorageMaintenance.Cleanup(ctx, provider, keys)
+	return a.StorageMaintenance.Cleanup(a.storageContext(), params.Provider, params.Keys)
 }
 
-// FixMissingPhotos unlinks local library records whose objects are gone from the
-// storage source. It is a purely local repair and never deletes a remote photo.
-func (a *App) FixMissingPhotos(photoIDs []string) (*services.FixMissingPhotosResult, error) {
+// FixMissingPhotos repairs records whose files are gone. The two backends do
+// genuinely different things — the server deletes its photo rows, the Desktop
+// clears its own stale cloud projection — so they must not be merged.
+func (a *App) FixMissingPhotos(params services.StorageMissingParams) (*services.FixMissingPhotosResult, error) {
+	if params.Kind == services.StorageKindWeb {
+		if a.StorageWebService == nil {
+			return nil, errors.New("服务器存储服务未初始化")
+		}
+		return a.StorageWebService.FixMissing(params.PhotoIDs)
+	}
 	if a.StorageMaintenance == nil {
 		return nil, errors.New("存储整理服务未初始化")
 	}
-	return a.StorageMaintenance.FixMissing(photoIDs)
+	return a.StorageMaintenance.FixMissing(params.PhotoIDs)
 }
 
-// GenerateThumbnail re-queues thumbnail generation in the local derivative
-// pipeline for the given library asset.
-func (a *App) GenerateThumbnail(photoID string) error {
+// GenerateThumbnail re-queues thumbnail generation. Web sources ask the server
+// to regenerate; plugin sources run the local derivative pipeline.
+func (a *App) GenerateThumbnail(params services.StorageThumbnailParams) error {
+	if params.Kind == services.StorageKindWeb {
+		if a.StorageWebService == nil {
+			return errors.New("服务器存储服务未初始化")
+		}
+		return a.StorageWebService.GenerateThumbnail(params.PhotoID)
+	}
 	if a.StorageMaintenance == nil {
 		return errors.New("存储整理服务未初始化")
 	}
-	return a.StorageMaintenance.GenerateThumbnail(photoID)
+	return a.StorageMaintenance.GenerateThumbnail(params.PhotoID)
 }

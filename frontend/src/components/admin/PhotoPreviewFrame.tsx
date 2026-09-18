@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { ChevronLeft, ChevronRight, ExternalLink, Loader2, Maximize2, Minimize2, RotateCcw, RotateCw, Square, Volume2, VolumeX, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Crop, ExternalLink, Image as ImageIcon, Loader2, RotateCcw, RotateCw, Square, Volume2, VolumeX, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { LivePhotoIcon } from '@/components/icons/LivePhotoIcon'
 
 const LIVE_PHOTO_SOUND_KEY = 'mo-gallery.live-photo-sound-enabled'
@@ -14,8 +14,6 @@ function getLivePhotoSoundPreference() {
 }
 
 export interface PhotoPreviewFrameCopy {
-  viewOriginal: string
-  fitWindow: string
   zoomOut: string
   resetZoom: string
   zoomIn: string
@@ -28,6 +26,7 @@ export interface PhotoPreviewFrameCopy {
   openSystem?: string
   rotateClockwise?: string
   rotateCounterclockwise?: string
+  edit?: string
 }
 
 interface Props {
@@ -41,10 +40,22 @@ interface Props {
   copy: PhotoPreviewFrameCopy
   onClose: () => void
   onOpenSystem?: () => void
+  onEdit?: () => void
+  /**
+   * Set to false while a modal editor is stacked on top, so this frame stops
+   * consuming Escape and the arrow keys on the shared window target.
+   */
+  keysEnabled?: boolean
   onPrevious?: () => void
   onNext?: () => void
   hasPrevious?: boolean
   hasNext?: boolean
+  /** Del 键触发删除确认弹窗；未提供时不监听。 */
+  onDelete?: () => void
+  /** 本地资源库：原图与预览图读取没有性能差，直接显示原图（失败回退预览图）。 */
+  preferOriginal?: boolean
+  /** 云端资源库：原图后台加载，加载完成前用预览图过渡，就绪后自动切换。 */
+  progressive?: boolean
   fallback?: ReactNode
 }
 
@@ -59,15 +70,21 @@ export function PhotoPreviewFrame({
   copy,
   onClose,
   onOpenSystem,
+  onEdit,
+  keysEnabled = true,
   onPrevious,
   onNext,
   hasPrevious = false,
   hasNext = false,
+  onDelete,
+  preferOriginal = false,
+  progressive = false,
   fallback,
 }: Props) {
-  const [showOriginal, setShowOriginal] = useState(Boolean(originalSrc))
   const [originalFailed, setOriginalFailed] = useState(false)
-  const [imageFailed, setImageFailed] = useState(false)
+  const [originalReady, setOriginalReady] = useState(false)
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
+  const [reloadNonce, setReloadNonce] = useState(0)
   const [loading, setLoading] = useState(Boolean(originalSrc || previewSrc))
   const [zoom, setZoom] = useState(1)
   const [offset, setOffset] = useState({ x: 0, y: 0 })
@@ -80,20 +97,27 @@ export function PhotoPreviewFrame({
   const dragStartRef = useRef<{ x: number, y: number, offsetX: number, offsetY: number } | null>(null)
 
   useEffect(() => {
-    document.body.classList.add('mo-fullscreen-preview')
-    return () => document.body.classList.remove('mo-fullscreen-preview')
-  }, [])
-
-  useEffect(() => {
-    setShowOriginal(Boolean(originalSrc))
     setOriginalFailed(false)
-    setImageFailed(false)
+    setFailedSrc(null)
+    setOriginalReady(false)
     setLoading(Boolean(originalSrc || previewSrc))
     setZoom(1)
     setOffset({ x: 0, y: 0 })
     setRotation(0)
     setShowLiveVideo(Boolean(livePhotoVideoSrc))
   }, [originalSrc, previewSrc, livePhotoVideoSrc])
+
+  // progressive：原图在后台加载（完成时多半已进缓存，切换是无缝的），
+  // 就绪前用预览图顶上；加载失败则一直停留在预览图上。
+  useEffect(() => {
+    if (!progressive || !originalSrc) return
+    let disposed = false
+    const probe = new Image()
+    probe.onload = () => { if (!disposed) setOriginalReady(true) }
+    probe.onerror = () => { if (!disposed) setOriginalFailed(true) }
+    probe.src = originalSrc
+    return () => { disposed = true }
+  }, [progressive, originalSrc, reloadNonce])
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -130,6 +154,7 @@ export function PhotoPreviewFrame({
   }
 
   useEffect(() => {
+    if (!keysEnabled) return
     const onKeyDown = (event: KeyboardEvent) => {
       switch (event.key) {
         case 'Escape':
@@ -141,6 +166,9 @@ export function PhotoPreviewFrame({
           break
         case 'ArrowRight':
           if (onNext && hasNext) { event.preventDefault(); onNext() }
+          break
+        case 'Delete':
+          if (onDelete) { event.preventDefault(); onDelete() }
           break
         case ' ':
           if (livePhotoVideoSrc && !event.repeat) {
@@ -169,11 +197,15 @@ export function PhotoPreviewFrame({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose, onPrevious, onNext, hasPrevious, hasNext, livePhotoVideoSrc, showLiveVideo])
+  }, [onClose, onPrevious, onNext, hasPrevious, hasNext, onDelete, livePhotoVideoSrc, showLiveVideo, keysEnabled])
 
   const setZoomLevel = (value: number) => setZoom(Math.min(5, Math.max(0.25, value)))
-  const activeSrc = showOriginal && !originalFailed ? originalSrc : previewSrc
+  // 显示源：preferOriginal（本地）直接用原图；progressive（云端）原图就绪前用
+  // 预览图。原图加载/解码失败一律回退预览图，预览图也失败才显示 fallback。
+  const originalActive = preferOriginal ? !originalFailed : progressive ? originalReady && !originalFailed : false
+  const activeSrc = originalActive && originalSrc ? originalSrc : previewSrc
   const hasImage = Boolean(activeSrc)
+  const imageFailed = Boolean(activeSrc && failedSrc === activeSrc)
 
   const resetView = () => {
     setZoom(1)
@@ -183,29 +215,25 @@ export function PhotoPreviewFrame({
 
   const exifRotation = originalOrientation === 3 ? 180 : originalOrientation === 6 ? 90 : originalOrientation === 8 ? 270 : 0
 
-  const toggleSource = () => {
-    const nextOriginal = !showOriginal || originalFailed
-    setShowOriginal(nextOriginal)
-    setOriginalFailed(false)
-    setImageFailed(false)
-    setLoading(nextOriginal ? Boolean(originalSrc) : Boolean(previewSrc))
-    resetView()
-  }
-
   const retryOriginal = () => {
-    setShowOriginal(true)
     setOriginalFailed(false)
-    setImageFailed(false)
-    setLoading(true)
-    resetView()
+    setOriginalReady(false)
+    setFailedSrc(null)
+    setLoading(Boolean(originalSrc))
+    setReloadNonce((value) => value + 1)
   }
 
   return (
-    <div ref={dialogRef} className="fixed inset-0 z-[70] flex flex-col bg-black/95 text-white" role="dialog" aria-modal="true" aria-label={title}>
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 px-4">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium">{title}</div>
-          {subtitle && <div className="truncate text-[10px] text-white/50">{subtitle}</div>}
+    <div ref={dialogRef} className="fixed inset-x-0 bottom-0 top-9 z-[70] flex flex-col bg-black/95 text-white" role="dialog" aria-modal="true" aria-label={title}>
+      {/* 头部与编辑器（LocalImageEditor）同一规范：图标 + 主行 + 次行；工具栏按
+          功能分组（Live ／ 原图与缩放 ／ 旋转 ／ 编辑），组间用编辑器同款的细分隔线。 */}
+      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <ImageIcon size={17} className="shrink-0 text-white/60" />
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium">{title}</div>
+            {subtitle && <div className="truncate text-[10px] text-white/50">{subtitle}</div>}
+          </div>
         </div>
         <div className="flex items-center gap-1">
           {hasImage && (
@@ -227,15 +255,19 @@ export function PhotoPreviewFrame({
                   {livePhotoSoundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
                 </button>
               )}
-              <button type="button" onClick={toggleSource} className="flex items-center gap-2 rounded-md px-3 py-2 text-xs hover:bg-white/10" aria-label={showOriginal && !originalFailed ? copy.fitWindow : copy.viewOriginal}>
-                {showOriginal && !originalFailed ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                {showOriginal && !originalFailed ? copy.fitWindow : copy.viewOriginal}
-              </button>
+              {livePhotoVideoSrc && <span className="mx-1 h-5 w-px shrink-0 bg-white/15" />}
               <button type="button" onClick={() => setZoomLevel(zoom - 0.25)} className="rounded-md p-2 hover:bg-white/10" aria-label={copy.zoomOut}><ZoomOut size={17} /></button>
-              {copy.rotateCounterclockwise && <button type="button" onClick={() => setRotation((value) => value - 90)} className="rounded-md p-2 hover:bg-white/10" title={copy.rotateCounterclockwise} aria-label={copy.rotateCounterclockwise}><RotateCcw size={17} /></button>}
-              {copy.rotateClockwise && <button type="button" onClick={() => setRotation((value) => value + 90)} className="rounded-md p-2 hover:bg-white/10" title={copy.rotateClockwise} aria-label={copy.rotateClockwise}><RotateCw size={17} /></button>}
               <button type="button" onClick={resetView} className="w-12 rounded-md px-1 text-center text-[10px] text-white/60 hover:bg-white/10" aria-label={copy.resetZoom}>{Math.round(zoom * 100)}%</button>
               <button type="button" onClick={() => setZoomLevel(zoom + 0.25)} className="rounded-md p-2 hover:bg-white/10" aria-label={copy.zoomIn}><ZoomIn size={17} /></button>
+              {(copy.rotateCounterclockwise || copy.rotateClockwise) && <span className="mx-1 h-5 w-px shrink-0 bg-white/15" />}
+              {copy.rotateCounterclockwise && <button type="button" onClick={() => setRotation((value) => value - 90)} className="rounded-md p-2 hover:bg-white/10" title={copy.rotateCounterclockwise} aria-label={copy.rotateCounterclockwise}><RotateCcw size={17} /></button>}
+              {copy.rotateClockwise && <button type="button" onClick={() => setRotation((value) => value + 90)} className="rounded-md p-2 hover:bg-white/10" title={copy.rotateClockwise} aria-label={copy.rotateClockwise}><RotateCw size={17} /></button>}
+              {onEdit && copy.edit && (
+                <>
+                  <span className="mx-1 h-5 w-px shrink-0 bg-white/15" />
+                  <button type="button" onClick={onEdit} className="flex items-center gap-2 rounded-md px-3 py-2 text-xs hover:bg-white/10" title={copy.edit} aria-label={copy.edit}><Crop size={15} />{copy.edit}</button>
+                </>
+              )}
             </>
           )}
           {onOpenSystem && copy.openSystem && <button type="button" onClick={onOpenSystem} className="rounded-md p-2 hover:bg-white/10" title={copy.openSystem} aria-label={copy.openSystem}><ExternalLink size={17} /></button>}
@@ -271,8 +303,8 @@ export function PhotoPreviewFrame({
               onLoad={() => setLoading(false)}
               onError={() => {
                 setLoading(false)
-                if (showOriginal && previewSrc && previewSrc !== originalSrc) setOriginalFailed(true)
-                else setImageFailed(true)
+                if (activeSrc === originalSrc) setOriginalFailed(true)
+                else setFailedSrc(activeSrc ?? null)
               }}
               onPointerDown={(event) => {
                 if (zoom <= 1) return

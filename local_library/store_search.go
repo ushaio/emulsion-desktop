@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 // The search index used to be an fts5 table with an UNINDEXED asset_id column,
@@ -17,6 +18,19 @@ import (
 // they append to asset_search_dirty, and the rows are rebuilt set-based by
 // flushAssetSearch. Bulk indexing therefore pays one merged FTS write per
 // batch instead of one expensive rebuild per row.
+//
+// Because these triggers fire inside every transaction that writes an asset,
+// they must not depend on their own conflict clause. SQLite documents that "if
+// an ON CONFLICT clause is specified as part of the statement causing the
+// trigger to fire, then conflict handling policy of the outer statement is used
+// instead" — an UPSERT carries one, and its clause names only its own conflict
+// target, so every other constraint in that statement resolves under the
+// default ABORT. upsertEXIF is an UPSERT and shares a transaction with the
+// assets UPDATE that already queued the same asset, so a body written as
+// `INSERT OR IGNORE` raised "UNIQUE constraint failed:
+// asset_search_dirty.asset_id" and failed the whole scan. The bodies below
+// therefore state the condition themselves, as a guarded
+// INSERT ... SELECT ... WHERE NOT EXISTS, which no outer statement can override.
 
 const assetSearchColumns = "file_name,relative_path,display_title,notes,tags,collections,camera"
 
@@ -50,33 +64,79 @@ var assetSearchSchema = []string{
 }
 
 // legacyAssetSearchObjects are dropped before the new schema is created so a
-// pre-M014 library does not keep the expensive triggers around.
+// pre-M014 library does not keep the expensive legacy index around. The
+// triggers are not listed here: dropSupersededAssetSearchTriggers covers every
+// name assetSearchTriggerNames holds and runs unconditionally.
 var legacyAssetSearchObjects = []string{
-	`DROP TRIGGER IF EXISTS asset_search_assets_insert`,
-	`DROP TRIGGER IF EXISTS asset_search_assets_update`,
-	`DROP TRIGGER IF EXISTS asset_search_assets_delete`,
-	`DROP TRIGGER IF EXISTS asset_search_exif_insert`,
-	`DROP TRIGGER IF EXISTS asset_search_exif_update`,
-	`DROP TRIGGER IF EXISTS asset_search_exif_delete`,
-	`DROP TRIGGER IF EXISTS asset_search_asset_tags_insert`,
-	`DROP TRIGGER IF EXISTS asset_search_asset_tags_delete`,
-	`DROP TRIGGER IF EXISTS asset_search_tags_update`,
-	`DROP TRIGGER IF EXISTS asset_search_collection_assets_insert`,
-	`DROP TRIGGER IF EXISTS asset_search_collection_assets_delete`,
-	`DROP TRIGGER IF EXISTS asset_search_collections_update`,
 	`DROP VIEW IF EXISTS asset_search_source`,
 	`DROP TABLE IF EXISTS asset_search`,
 }
 
-func assetSearchDirtyTrigger(name, event, assetID string) string {
-	return fmt.Sprintf(`CREATE TRIGGER IF NOT EXISTS %s %s BEGIN
-        INSERT OR IGNORE INTO asset_search_dirty(asset_id) VALUES(%s);
-    END`, name, event, assetID)
+// assetSearchTriggerNames is every trigger assetSearchSchema installs, derived
+// from the schema itself. All of them are dropped before the schema is
+// (re)created, because CREATE TRIGGER IF NOT EXISTS leaves an existing trigger
+// alone and a library carrying an older body would otherwise keep it forever.
+//
+// Deriving the names rather than listing them keeps the DROP set and the CREATE
+// set structurally in step: a trigger added to the schema below cannot be left
+// out of the rebuild, which is the failure this mechanism exists to prevent.
+var assetSearchTriggerNames = func() []string {
+	names := make([]string, 0, len(assetSearchSchema))
+	for _, statement := range assetSearchSchema {
+		if name, ok := triggerNameFromCreate(statement); ok {
+			names = append(names, name)
+		}
+	}
+	return names
+}()
+
+// triggerNameFromCreate reads the name out of a CREATE TRIGGER statement. Only
+// the statements in assetSearchSchema are passed, which are written in this file
+// with the same prefix, so the parse is over known input.
+func triggerNameFromCreate(statement string) (string, bool) {
+	const prefix = "CREATE TRIGGER IF NOT EXISTS "
+	if !strings.HasPrefix(statement, prefix) {
+		return "", false
+	}
+	rest := statement[len(prefix):]
+	if end := strings.IndexAny(rest, " \n\t"); end > 0 {
+		return rest[:end], true
+	}
+	return "", false
 }
 
+// dropSupersededAssetSearchTriggers removes every trigger the schema installs so
+// it can recreate them, replacing whatever bodies an earlier build left behind.
+// It runs on every open and is a no-op once the current bodies are in place.
+func dropSupersededAssetSearchTriggers(tx *sql.Tx) error {
+	for _, name := range assetSearchTriggerNames {
+		// Bare identifiers written in this file, never user input.
+		if _, err := tx.Exec(`DROP TRIGGER IF EXISTS ` + name); err != nil {
+			return fmt.Errorf("drop superseded search index trigger %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// assetSearchDirtyTrigger queues a single asset id. The NOT EXISTS guard is what
+// makes the insert idempotent; a conflict clause must not be used instead,
+// because the firing statement's own clause overrides it (see the note at the
+// top of the file).
+func assetSearchDirtyTrigger(name, event, assetID string) string {
+	return fmt.Sprintf(`CREATE TRIGGER IF NOT EXISTS %s %s BEGIN
+        INSERT INTO asset_search_dirty(asset_id)
+        SELECT %s WHERE NOT EXISTS (SELECT 1 FROM asset_search_dirty dirty WHERE dirty.asset_id=%s);
+    END`, name, event, assetID, assetID)
+}
+
+// assetSearchRelatedDirtyTrigger queues every asset linked to a renamed tag or
+// collection, under the same NOT EXISTS guard.
 func assetSearchRelatedDirtyTrigger(name, event, relation, foreignKey, relatedID string) string {
 	return fmt.Sprintf(`CREATE TRIGGER IF NOT EXISTS %s %s BEGIN
-        INSERT OR IGNORE INTO asset_search_dirty(asset_id) SELECT asset_id FROM %s WHERE %s=%s;
+        INSERT INTO asset_search_dirty(asset_id)
+        SELECT related.asset_id FROM %s related
+        WHERE related.%s=%s
+          AND NOT EXISTS (SELECT 1 FROM asset_search_dirty dirty WHERE dirty.asset_id=related.asset_id);
     END`, name, event, relation, foreignKey, relatedID)
 }
 
@@ -94,6 +154,9 @@ func migrateAssetSearch(tx *sql.Tx) error {
 				return fmt.Errorf("drop legacy search index: %w", err)
 			}
 		}
+	}
+	if err := dropSupersededAssetSearchTriggers(tx); err != nil {
+		return err
 	}
 	for _, statement := range assetSearchSchema {
 		if _, err := tx.Exec(statement); err != nil {

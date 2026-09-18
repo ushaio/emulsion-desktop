@@ -243,7 +243,9 @@ export function UploadPage() {
       } catch { failed.push('胶卷') }
       try {
         const r = await GetStorageSources()
-        const sources = r || []
+        // 只保留插件已安装的源：卸载插件会保留源配置（便于重装后恢复），
+        // 但这类源无法上传，列在下拉里只会让用户选了之后才失败。
+        const sources = (r || []).filter(source => source.pluginInstalled !== false)
         setStorageSources(sources)
         // 恢复的存储源仍存在时保留；否则自动选中第一个
         if (sources.length > 0) {

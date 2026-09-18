@@ -13,6 +13,17 @@ import { LocalLibraryUpgradeDialog } from '@/features/library/local/entry/LocalL
 import type { EntryState, LibrarySnapshot, LibraryUpgradeInfo, LocalAsset } from '@/features/library/local/types'
 import { GlassBackdrop } from '@/components/ui/liquid-glass'
 
+/** The folder name is the best label available for a path outside the recent list. */
+function pathLabel(path: string) {
+  const trimmed = path.replace(/[\\/]+$/, '')
+  return trimmed.split(/[\\/]/).pop() || trimmed
+}
+
+/** Same library? Trailing separators and Windows casing must not decide it. */
+function samePath(left: string, right: string) {
+  return left.replace(/[\\/]+$/, '').toLowerCase() === right.replace(/[\\/]+$/, '').toLowerCase()
+}
+
 interface LocalLibraryProps {
   selectionMode?: boolean
   existingAssetIds?: string[]
@@ -35,6 +46,7 @@ export function LocalLibrary({ selectionMode = false, existingAssetIds = [], onS
   const [upgradeRequest, setUpgradeRequest] = useState<LibraryUpgradeInfo | null>(null)
   const [upgradePhase, setUpgradePhase] = useState<'confirm' | 'running' | 'completed' | 'failed'>('confirm')
   const [upgradeError, setUpgradeError] = useState('')
+  const [upgradeProgress, setUpgradeProgress] = useState({ current: 0, total: 0 })
   // True while the upgrade dialog was raised by a user action (clicking a recent
   // entry, or picking a folder) rather than by the entry state's restore attempt.
   // Clicking a library that needs an upgrade fails the open and then refreshes the
@@ -73,6 +85,11 @@ export function LocalLibrary({ selectionMode = false, existingAssetIds = [], onS
       required: true,
     }
   }
+
+  /** The name to show for a library path, falling back to its folder name. */
+  const libraryLabel = useCallback((path: string) => (
+    entry.recent.find((item) => samePath(item.path, path))?.name || pathLabel(path)
+  ), [entry.recent])
 
   const loadEntry = useCallback(async () => {
     setLoading(true)
@@ -201,10 +218,15 @@ export function LocalLibrary({ selectionMode = false, existingAssetIds = [], onS
     }
   }, [initializePath, copy.initialize, startOpening, endOpening])
 
-  const handleUpgradeStart = async () => {
-    if (!upgradeRequest) return
+  const beginUpgradeRun = (total: number) => {
     setUpgradePhase('running')
     setUpgradeError('')
+    setUpgradeProgress({ current: 1, total })
+  }
+
+  const handleUpgradeStart = async () => {
+    if (!upgradeRequest) return
+    beginUpgradeRun(1)
     try {
       const upgraded = await localLibraryApi.upgrade(upgradeRequest.rootPath)
       setUpgradeRequest(upgraded)
@@ -213,6 +235,63 @@ export function LocalLibrary({ selectionMode = false, existingAssetIds = [], onS
       setUpgradeError(parseLocalLibraryError(cause).message)
       setUpgradePhase('failed')
     }
+  }
+
+  /**
+   * Upgrade every library in the recent list that still needs it, starting with
+   * the one that raised this dialog. Each target is version-checked first, so a
+   * library that is already current costs a read rather than a rewrite, and the
+   * library currently open is left alone: the backend refuses to upgrade it
+   * while this session holds its lock.
+   *
+   * A failed library does not stop the run — the rest still upgrade, and the
+   * dialog reports how many failed so the user knows to look again.
+   */
+  const handleUpgradeAll = async () => {
+    const openRoot = snapshot?.rootPath ?? ''
+    const seen = new Set<string>()
+    const targets: string[] = []
+    const addTarget = (root: string) => {
+      const key = root.replace(/[\\/]+$/, '').toLowerCase()
+      if (!root || seen.has(key)) return
+      seen.add(key)
+      targets.push(root)
+    }
+    if (upgradeRequest) addTarget(upgradeRequest.rootPath)
+    for (const item of entry.recent) {
+      if (!item.available || !item.path) continue
+      if (openRoot && samePath(item.path, openRoot)) continue
+      addTarget(item.path)
+    }
+
+    beginUpgradeRun(targets.length)
+    let failures = 0
+    const failedNames: string[] = []
+    let primary: LibraryUpgradeInfo | null = null
+    for (const [index, root] of targets.entries()) {
+      setUpgradeProgress({ current: index + 1, total: targets.length })
+      try {
+        const check = await localLibraryApi.checkUpgrade(root)
+        if (!check.required) continue
+        const upgraded = await localLibraryApi.upgrade(root)
+        if (upgradeRequest && samePath(root, upgradeRequest.rootPath)) primary = upgraded
+      } catch {
+        failures++
+        failedNames.push(libraryLabel(root))
+      }
+    }
+
+    if (primary) setUpgradeRequest(primary)
+    setUpgradeProgress({ current: 0, total: 0 })
+    if (failures > 0) {
+      setUpgradeError(copy.upgradeBatchFailed.replace('{names}', failedNames.join('、')))
+      setUpgradePhase('failed')
+      return
+    }
+    // Only the library behind the dialog can be opened afterwards, so a run that
+    // did not upgrade it returns to the confirm step rather than offering a
+    // button that would fail.
+    setUpgradePhase(primary ? 'completed' : 'confirm')
   }
 
   const handleUpgradeConfirm = async () => {
@@ -238,7 +317,9 @@ export function LocalLibrary({ selectionMode = false, existingAssetIds = [], onS
       info={upgradeRequest}
       phase={upgradePhase}
       error={upgradeError}
+      progress={upgradeProgress}
       onStart={() => void handleUpgradeStart()}
+      onUpgradeAll={() => void handleUpgradeAll()}
       onCancel={() => { if (upgradePhase !== 'running') setUpgradeRequest(null) }}
       onConfirm={() => void handleUpgradeConfirm()}
     />

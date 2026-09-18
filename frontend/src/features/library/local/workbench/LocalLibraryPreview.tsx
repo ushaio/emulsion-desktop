@@ -1,6 +1,6 @@
 import { FileText } from 'lucide-react'
 import { PhotoPreviewFrame } from '@/components/admin/PhotoPreviewFrame'
-import { isPhotoAsset, isPlayableAsset } from '../types'
+import { isPhotoAsset, isPlayableAsset, isEditableImageAsset } from '../types'
 import type { LocalAsset, LocalAssetClip } from '../types'
 import type { LocalLibraryCopy } from '../copy'
 import { MediaPlayerFrame } from './MediaPlayerFrame'
@@ -17,6 +17,12 @@ interface Props {
   /** When set, the player opens playing just this clip's range. */
   initialClip?: { startMs: number, endMs: number, title?: string } | null
   onClipsChanged?: (assetId: string, clips: LocalAssetClip[]) => void
+  /** Opens the crop/rotate editor. Only offered for formats the backend can rewrite. */
+  onEdit?: (asset: LocalAsset) => void
+  /** Suppressed while the editor is stacked on top, so Escape does not close both. */
+  keysEnabled?: boolean
+  /** Del 键触发删除确认弹窗。 */
+  onDelete?: (asset: LocalAsset) => void
 }
 
 function formatBytes(value: number) {
@@ -26,7 +32,7 @@ function formatBytes(value: number) {
   return `${(value / 1024 ** 3).toFixed(2)} GB`
 }
 
-export function LocalLibraryPreview({ asset, copy, onClose, onOpenSystem, onPrevious, onNext, hasPrevious = false, hasNext = false, initialClip = null, onClipsChanged }: Props) {
+export function LocalLibraryPreview({ asset, copy, onClose, onOpenSystem, onPrevious, onNext, hasPrevious = false, hasNext = false, initialClip = null, onClipsChanged, onEdit, keysEnabled = true, onDelete }: Props) {
   const isPhoto = isPhotoAsset(asset)
 
   if (isPlayableAsset(asset)) {
@@ -46,16 +52,16 @@ export function LocalLibraryPreview({ asset, copy, onClose, onOpenSystem, onPrev
   }
 
   const previewPending = asset.previewStatus === 'pending' || asset.previewStatus === 'generating'
-  const rawFormats = new Set(['cr2', 'cr3', 'nef', 'arw', 'dng', 'raf', 'rw2', 'orf', 'srw', 'pef'])
+  const rawFormats = new Set(['cr2', 'cr3', 'nef', 'arw', 'dng', 'raf', 'rw2', '3fr', 'orf', 'srw', 'pef'])
   const isRaw = rawFormats.has(asset.format.toLowerCase())
   const originalOrientation = 1
-  const viewOriginalLabel = copy.original.startsWith('Original') ? 'View original' : '查看原图'
   const frameCopy = {
-    viewOriginal: viewOriginalLabel, fitWindow: copy.fitted, zoomOut: copy.zoomOut, resetZoom: copy.resetZoom, zoomIn: copy.zoomIn,
+    zoomOut: copy.zoomOut, resetZoom: copy.resetZoom, zoomIn: copy.zoomIn,
     close: copy.close, previous: copy.previous, next: copy.next, loading: copy.loadingOriginal, originalUnavailable: copy.originalUnavailable,
     rotateClockwise: copy.original.startsWith('Original') ? 'Rotate clockwise' : '顺时针旋转',
     rotateCounterclockwise: copy.original.startsWith('Original') ? 'Rotate counterclockwise' : '逆时针旋转',
     retry: copy.retry,
+    edit: copy.editImage,
   }
 
   return <PhotoPreviewFrame
@@ -69,6 +75,10 @@ export function LocalLibraryPreview({ asset, copy, onClose, onOpenSystem, onPrev
     alt={asset.displayTitle || asset.fileName}
     copy={frameCopy}
     onClose={onClose}
+    onEdit={onEdit && isEditableImageAsset(asset) ? () => onEdit(asset) : undefined}
+    keysEnabled={keysEnabled}
+    preferOriginal
+    onDelete={onDelete ? () => onDelete(asset) : undefined}
     onPrevious={onPrevious}
     onNext={onNext}
     hasPrevious={hasPrevious}

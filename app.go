@@ -65,9 +65,13 @@ type App struct {
 	AgentExtensions     *agent_extensions.Manager
 	StoragePlugins      *storage_plugins.Manager
 	PluginMarketplace   *storage_plugins.Marketplace
-	StorageMaintenance  *services.StorageMaintenanceService
-	automationEnabled   bool
-	automation          *automationBridge
+	// StorageMaintenance serves Desktop plugin sources locally;
+	// StorageWebService serves the server's own sources over the proxy. The
+	// storage maintenance page shows both and picks one per selected tab.
+	StorageMaintenance *services.StorageMaintenanceService
+	StorageWebService  *services.StorageWebService
+	automationEnabled  bool
+	automation         *automationBridge
 }
 
 func NewApp(cfg *config.Config, automationEnabled bool) *App {
@@ -88,6 +92,9 @@ func NewApp(cfg *config.Config, automationEnabled bool) *App {
 		app.StoragePlugins = storageManager
 		app.PluginMarketplace = storage_plugins.NewMarketplace(config.ConfigDir(), storageManager)
 	}
+	// Backups embed the app version in their metadata so the backup list can
+	// tell "which app created this backup" apart.
+	local_library.SetBackupAppVersion(desktopAppVersion())
 	app.LocalLibrary = local_library.NewManager(config.SettingsDir(), func(event local_library.LocalLibraryEvent) {
 		if app.ctx != nil {
 			runtime.EventsEmit(app.ctx, "local-library:event", event)
@@ -96,6 +103,9 @@ func NewApp(cfg *config.Config, automationEnabled bool) *App {
 	// Storage maintenance reconciles a desktop storage plugin source against the
 	// local library's cloud projection, so it needs both managers.
 	app.StorageMaintenance = services.NewStorageMaintenanceService(app.StoragePlugins, app.LocalLibrary)
+	// Server-side sources take the proxy path instead; the two coexist because
+	// the page lists both kinds of source.
+	app.StorageWebService = services.NewStorageWebService(app.Proxy)
 	return app
 }
 

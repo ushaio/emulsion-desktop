@@ -16,15 +16,15 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const currentSchemaVersion = 15
+const currentSchemaVersion = 18
 
 // sqliteBatchParameters caps how many bound parameters a generated statement
 // uses. SQLITE_MAX_VARIABLE_NUMBER defaults to 32766 in modern SQLite; staying
 // well below that keeps generated IN (...) filters safe.
 const sqliteBatchParameters = 500
 
-var createUpgradeBackup = func(ctx context.Context, root string, db *sql.DB) error {
-	_, err := createBackupFile(ctx, root, BackupKindUpgrade, db)
+var createUpgradeBackup = func(ctx context.Context, root string, db *sql.DB, fromVersion int) error {
+	_, err := createBackupFile(ctx, root, BackupKindUpgrade, db, backupParams{schemaVersion: fromVersion})
 	return err
 }
 
@@ -128,7 +128,7 @@ func openStoreWithMigration(root string, migrateStore func(*store) error, reject
 		})
 	}
 	if needsMigration {
-		if err := createUpgradeBackup(context.Background(), root, db); err != nil {
+		if err := createUpgradeBackup(context.Background(), root, db, version); err != nil {
 			db.Close()
 			return nil, fmt.Errorf("create pre-upgrade backup: %w", err)
 		}
@@ -460,6 +460,49 @@ func (s *store) migrate() error {
 	if _, err := tx.Exec(`UPDATE assets SET media_kind='audio', preview_status='pending', preview_error='', metadata_status='partial'
 		WHERE media_kind='file' AND lower(extension) IN ('.mp3','.m4a','.aac','.wav','.flac','.ogg')`); err != nil {
 		return fmt.Errorf("M015 reclassify audio assets: %w", err)
+	}
+	// M016: BMP became a readable image format, but a library indexed before
+	// that holds every .bmp file as a generic 'file' row. Reclassify them the
+	// way M015 did video and audio, because media_kind is what the grid, the
+	// dimension/orientation filters and the thumbnail repair actions all read:
+	// keyed off it, an unchanged file is never inspected again, so without this
+	// the rows stay 'file' forever and the repair actions cannot even see them.
+	//
+	// Dimensions stay at 0 here — only a re-inspect can measure a file — and
+	// classifyScanEntries picks these rows up through its unmeasured-image rule.
+	// A future format follows the same two steps: a reclassify migration here,
+	// and the scan's re-inspect for the columns SQL cannot fill in.
+	if _, err := tx.Exec(`UPDATE assets SET media_kind='image', preview_status='pending', preview_error='', metadata_status='partial'
+		WHERE media_kind='file' AND lower(extension) IN ('.bmp')`); err != nil {
+		return fmt.Errorf("M016 reclassify BMP assets: %w", err)
+	}
+	// M017: 3FR is Hasselblad's TIFF-based RAW container and is read the way the
+	// other RAW formats are — through the JPEG preview embedded in the file. A
+	// library indexed before this build holds those files as generic 'file'
+	// rows, so reclassify them exactly as M016 did for BMP: media_kind is what
+	// the grid, the filters and the thumbnail repair actions select on, and an
+	// unchanged file is never inspected again, so the kind has to be corrected
+	// here. The dimensions stay 0 until a re-inspect measures the file;
+	// classifyScanEntries picks these rows up through its unmeasured-image rule.
+	if _, err := tx.Exec(`UPDATE assets SET media_kind='image', preview_status='pending', preview_error='', metadata_status='partial'
+		WHERE media_kind='file' AND lower(extension) IN ('.3fr')`); err != nil {
+		return fmt.Errorf("M017 reclassify 3FR assets: %w", err)
+	}
+	// M018: the preview extractor used to blind-scan a fixed prefix of a RAW
+	// container, so every RAW larger than that prefix failed with "exceeds
+	// preview scan limit" — leaving the row indexed, undisplayable, and, worst of
+	// all, invisible to the scan: a row with a width and a terminal
+	// preview_status is considered up to date, so it would never be looked at
+	// again even though the extractor can now read it.
+	//
+	// The selector is the failure message rather than an extension list, because
+	// that is precisely the set of rows this bug produced and it keeps the
+	// migration valid for every affected format at once. It also cannot match
+	// twice: a re-inspect either succeeds and clears the error, or fails for a
+	// genuine reason and writes a different one.
+	if _, err := tx.Exec(`UPDATE assets SET preview_status='pending', preview_error='', metadata_status='partial'
+		WHERE media_kind IN ('image','live-photo') AND preview_error LIKE '%exceeds preview scan limit%'`); err != nil {
+		return fmt.Errorf("M018 requeue RAW previews that exceeded the old scan limit: %w", err)
 	}
 	// Keep the existing UUID as the stable public identity while assigning a
 	// compact SQLite integer identity for local indexing and future joins.
@@ -872,6 +915,14 @@ func buildAssetWhere(query AssetQuery, availability string) ([]string, []any, er
 		where = append(where, `a.local_id IN (SELECT rowid FROM asset_search WHERE asset_search MATCH ?)`)
 		args = append(args, search)
 	}
+	if ids := uniqueIDs(query.IDs); len(ids) > 0 {
+		// 直接按标识取行：编辑器素材库的待传项在草稿里只留 assetId，
+		// 恢复时用它一次换回原图路径与新鲜的缩略图 URL（缓存键随 mtime 变化）。
+		where = append(where, "a.id IN ("+queryPlaceholders(len(ids))+")")
+		for _, id := range ids {
+			args = append(args, id)
+		}
+	}
 	if query.Folder != "" || query.DirectFolderOnly {
 		_, folderKey, err := normalizeRelative(query.Folder)
 		if err != nil {
@@ -1161,7 +1212,13 @@ func (s *store) listAssets(ctx context.Context, query AssetQuery, sessionID stri
 		previewKey := derivativeCacheKey(item.ID, item.ModifiedAtNS, item.ByteSize, derivativePreview)
 		item.ThumbnailURL = "/__local-library/thumbnail/" + string(item.ID) + "?session=" + sessionID + "&v=" + thumbnailKey
 		item.PreviewURL = "/__local-library/preview/" + string(item.ID) + "?session=" + sessionID + "&v=" + previewKey
-		item.OriginalURL = "/__local-library/original/" + string(item.ID) + "?session=" + sessionID
+		// The original endpoint ignores "v", but the WebView reuses the decoded
+		// bitmap it holds for an identical URL even though the response is
+		// no-store. Busting on the file's mtime is what makes an overwritten
+		// original (image edit, external change) show its new pixels when the
+		// preview or the editor is (re)opened from row data instead of from an
+		// ImageEditResult that already carries a fresh key.
+		item.OriginalURL = "/__local-library/original/" + string(item.ID) + "?session=" + sessionID + "&v=" + strconv.FormatInt(item.ModifiedAtNS, 10)
 		if item.IsLivePhoto {
 			item.LivePhotoVideoURL = "/__local-library/livephoto/" + string(item.ID) + "?session=" + sessionID + "&v=" + thumbnailKey
 		}

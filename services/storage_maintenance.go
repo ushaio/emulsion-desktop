@@ -12,67 +12,15 @@ import (
 	"mo-gallery-desktop/storage_plugins"
 )
 
-// Object status values reported to the renderer. They intentionally mirror the
-// web admin vocabulary so the storage maintenance page keeps its original
-// behaviour while the data now comes from a desktop storage plugin.
-const (
-	StorageStatusLinked           = "linked"
-	StorageStatusOrphan           = "orphan"
-	StorageStatusMissing          = "missing"
-	StorageStatusMissingOriginal  = "missing_original"
-	StorageStatusMissingThumbnail = "missing_thumbnail"
-)
-
-// StorageObjectDTO is one row of the maintenance table: an object on a plugin
-// source, joined with what the local library knows about it.
-type StorageObjectDTO struct {
-	Key          string `json:"key"`
-	URL          string `json:"url"`
-	Size         int64  `json:"size"`
-	LastModified string `json:"lastModified"`
-	Status       string `json:"status"`
-	PhotoID      string `json:"photoId,omitempty"`
-	PhotoTitle   string `json:"photoTitle,omitempty"`
-	MissingType  string `json:"missingType,omitempty"`
-	HasThumb     bool   `json:"hasThumb,omitempty"`
-}
-
-type StorageScanStats struct {
-	Total            int `json:"total"`
-	Linked           int `json:"linked"`
-	Orphan           int `json:"orphan"`
-	Missing          int `json:"missing"`
-	MissingOriginal  int `json:"missingOriginal"`
-	MissingThumbnail int `json:"missingThumbnail"`
-}
-
-type StorageScanResult struct {
-	Files []StorageObjectDTO `json:"files"`
-	Stats StorageScanStats   `json:"stats"`
-	// Vendor names the concrete storage product behind the scanned source
-	// (cloudflare-r2, qiniu-kodo, ...). It belongs to the source, not to each
-	// object, so it is reported once here rather than repeated on every row.
-	Vendor string `json:"vendor,omitempty"`
-	// SourceName echoes the user-facing label of the scanned source so the page
-	// can render the header without a second lookup.
-	SourceName string `json:"sourceName,omitempty"`
-}
-
-type StorageCleanupResult struct {
-	Deleted int      `json:"deleted"`
-	Failed  int      `json:"failed"`
-	Errors  []string `json:"errors"`
-}
-
-type FixMissingPhotosResult struct {
-	Deleted int `json:"deleted"`
-}
-
 // StorageMaintenanceService reconciles a desktop storage plugin source against
 // the local library's cloud projection. Everything it needs is available
 // offline: the object listing comes from the plugin runtime and the ownership
 // records come from the local library database, so no server round-trip is
 // involved.
+//
+// The params, statuses and DTOs it shares with the web backend live in
+// storage.go; keeping one vocabulary is what lets the renderer show both kinds
+// of source in a single table.
 type StorageMaintenanceService struct {
 	plugins *storage_plugins.Manager
 	library *local_library.Manager
@@ -99,6 +47,27 @@ func (s *StorageMaintenanceService) checkReady() error {
 	return nil
 }
 
+// usableSource resolves a source that can actually be used: it exists and its
+// plugin package is still installed.
+//
+// Uninstalling a plugin intentionally keeps its source records so reinstalling
+// restores the configuration, so the registry can hold sources whose plugin is
+// gone. Without this check the failure surfaces from deep inside the plugin
+// host as "storage plugin is not installed: webdav" — true, but not actionable
+// for someone looking at a storage maintenance page.
+func (s *StorageMaintenanceService) usableSource(sourceID string) (storage_plugins.Source, error) {
+	source, ok := s.plugins.GetSource(sourceID)
+	if !ok {
+		return storage_plugins.Source{}, fmt.Errorf("存储源不存在：%s", sourceID)
+	}
+	if !s.plugins.PluginInstalled(source.PluginID) {
+		return storage_plugins.Source{}, fmt.Errorf(
+			"存储插件「%s」未安装，无法使用该存储源。请在设置中重新安装该插件，或删除此存储源",
+			source.PluginID)
+	}
+	return source, nil
+}
+
 // Scan reconciles one plugin source. When local library records are unavailable
 // (no library open) it still returns the source listing, marking every object
 // as orphan-unknown via an empty registration set. Callers that need the
@@ -111,9 +80,9 @@ func (s *StorageMaintenanceService) Scan(ctx context.Context, sourceID string) (
 	if sourceID == "" {
 		return nil, errors.New("请选择存储源")
 	}
-	source, ok := s.plugins.GetSource(sourceID)
-	if !ok {
-		return nil, fmt.Errorf("存储源不存在：%s", sourceID)
+	source, err := s.usableSource(sourceID)
+	if err != nil {
+		return nil, err
 	}
 
 	objects, err := s.listAllObjects(ctx, sourceID)
@@ -154,7 +123,7 @@ func (s *StorageMaintenanceService) Scan(ctx context.Context, sourceID string) (
 		}
 		if owner, ok := owners[object.Key]; ok {
 			row.Status = StorageStatusLinked
-			row.PhotoID = owner.PhotoID
+			row.PhotoID = string(owner.AssetID)
 			row.PhotoTitle = owner.Title
 			row.HasThumb = owner.HasThumb
 		} else {
@@ -164,29 +133,57 @@ func (s *StorageMaintenanceService) Scan(ctx context.Context, sourceID string) (
 		result.Files = append(result.Files, row)
 	}
 
-	// Registered objects that the source no longer holds. The original and its
-	// thumbnail are reported separately so the UI can distinguish a photo whose
-	// file is gone from one that only lost its thumbnail.
+	// Registered objects the source no longer holds.
+	//
+	// The taxonomy matches the server's /admin/storage/scan, because the renderer
+	// shows both backends in one table and a status must not change meaning with
+	// the selected tab: a photo missing BOTH its files is reported as "missing"
+	// (not as two separate rows), and the stats count each status separately
+	// rather than folding the two specific ones into the general one. Folding
+	// them made the page's "missing" total double-count.
+	//
+	// One deliberate divergence: the server treats a null thumbPath as a missing
+	// thumbnail (and keys that row by the original path, colliding with the
+	// originals listing). We only report what we can actually observe — see the
+	// thumbnail probe below.
 	for _, item := range registrations {
-		if _, ok := seen[item.Path]; !ok {
+		_, originalOnSource := seen[item.Path]
+		// Only probe the thumbnail when we actually know its key: an unrecorded
+		// thumbnail is not evidence that a thumbnail is missing, so claiming
+		// "both gone" for such a photo would assert more than we can see.
+		hasRegisteredThumb := item.ThumbPath != ""
+		thumbOnSource := false
+		if hasRegisteredThumb {
+			_, thumbOnSource = seen[item.ThumbPath]
+		}
+
+		switch {
+		case !originalOnSource && hasRegisteredThumb && !thumbOnSource:
+			// Both files are known by name and both are gone.
+			result.Files = append(result.Files, StorageObjectDTO{
+				Key:         item.Path,
+				Status:      StorageStatusMissing,
+				PhotoID:     string(item.AssetID),
+				PhotoTitle:  item.Title,
+				MissingType: "both",
+			})
+		case !originalOnSource:
+			// Original gone, thumbnail either still present or never recorded.
 			result.Files = append(result.Files, StorageObjectDTO{
 				Key:         item.Path,
 				Status:      StorageStatusMissingOriginal,
-				PhotoID:     item.PhotoID,
+				PhotoID:     string(item.AssetID),
 				PhotoTitle:  item.Title,
 				MissingType: "original",
 			})
-			continue
-		}
-		// The original exists, but a registered thumbnail key has no object.
-		if item.ThumbPath == "" {
-			continue
-		}
-		if _, ok := seen[item.ThumbPath]; !ok {
+		case hasRegisteredThumb && !thumbOnSource:
+			// Keyed by the thumbnail, not the original: the original exists on
+			// the source and already has a row, so keying by it would produce a
+			// duplicate row identity.
 			result.Files = append(result.Files, StorageObjectDTO{
 				Key:         item.ThumbPath,
 				Status:      StorageStatusMissingThumbnail,
-				PhotoID:     item.PhotoID,
+				PhotoID:     string(item.AssetID),
 				PhotoTitle:  item.Title,
 				MissingType: "thumbnail",
 			})
@@ -200,12 +197,12 @@ func (s *StorageMaintenanceService) Scan(ctx context.Context, sourceID string) (
 			result.Stats.Linked++
 		case StorageStatusOrphan:
 			result.Stats.Orphan++
+		case StorageStatusMissing:
+			result.Stats.Missing++
 		case StorageStatusMissingOriginal:
 			result.Stats.MissingOriginal++
-			result.Stats.Missing++
 		case StorageStatusMissingThumbnail:
 			result.Stats.MissingThumbnail++
-			result.Stats.Missing++
 		}
 	}
 	sort.SliceStable(result.Files, func(i, j int) bool { return result.Files[i].Key < result.Files[j].Key })
@@ -276,8 +273,8 @@ func (s *StorageMaintenanceService) Cleanup(ctx context.Context, sourceID string
 	if sourceID == "" {
 		return nil, errors.New("请选择存储源")
 	}
-	if _, ok := s.plugins.GetSource(sourceID); !ok {
-		return nil, fmt.Errorf("存储源不存在：%s", sourceID)
+	if _, err := s.usableSource(sourceID); err != nil {
+		return nil, err
 	}
 	if len(keys) == 0 {
 		return &StorageCleanupResult{}, nil
@@ -306,6 +303,11 @@ func (s *StorageMaintenanceService) Cleanup(ctx context.Context, sourceID string
 // FixMissing unlinks photos whose objects are gone from the source. Unlike the
 // web service this never deletes a remote photo record — the desktop library
 // only drops its own stale projection, which is a purely local repair.
+//
+// assetIDs are local library asset ids, i.e. the same value the scan reports as
+// each row's PhotoID for a plugin source. The cloud photo id is deliberately not
+// accepted here: the update targets the local assets table, so a cloud id would
+// simply match no row and the repair would silently do nothing.
 func (s *StorageMaintenanceService) FixMissing(assetIDs []string) (*FixMissingPhotosResult, error) {
 	if s.library == nil {
 		return nil, errors.New("本地资源库未初始化")
@@ -342,6 +344,15 @@ func (s *StorageMaintenanceService) GenerateThumbnail(assetID string) error {
 // delete an object the user never saw.
 func (s *StorageMaintenanceService) PreflightObjects(ctx context.Context, sourceID string, keys []string) ([]string, error) {
 	if err := s.checkReady(); err != nil {
+		return nil, err
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return nil, errors.New("请选择存储源")
+	}
+	// Fail once, up front: without this every key would start a runtime and
+	// fail separately, each surfacing the same opaque host error.
+	if _, err := s.usableSource(sourceID); err != nil {
 		return nil, err
 	}
 	present := make([]string, 0, len(keys))

@@ -6,6 +6,7 @@ import type { PhotoDto, StoryDto } from '@/lib/api/types'
 import { STORY_EDITOR_DRAFT_PREFIX, type StoryEditorDraftData } from '@/lib/client-db'
 import { getStoryEditorDraftFromDB, markStoryEditorDraftSynced, rekeyStoryEditorDraft, saveStoryEditorDraftToDB } from '@/lib/client-db'
 import type { PendingImage } from '@/components/admin/StoryPhotoPanel'
+import { draftEntriesFromPendingImages, localAssetPreviewUrls, pendingImagesFromDraftEntries } from '@/lib/editor-pending-import'
 import { AUTO_SAVE_DELAY } from './constants'
 import type { DraftRestoreDialogState, StorySnapshot } from './types'
 import { createEmptyStory } from './utils'
@@ -45,11 +46,6 @@ interface UseStoryDraftStateResult {
   saveDraft: () => Promise<void>
   resetDraftState: () => void
   acceptSavedStory: (story: StoryDto, sessionId: string) => boolean
-}
-
-function restorePendingImages(files?: StoryEditorDraftData['files']): PendingImage[] {
-  if (!files?.length) return []
-  return files.map((entry) => ({ id: entry.id, file: entry.file, previewUrl: URL.createObjectURL(entry.file), status: 'pending' as const, progress: 0, takenAt: entry.takenAt, assetId: entry.assetId }))
 }
 
 function createSnapshot(story: StoryDto): StorySnapshot {
@@ -114,6 +110,30 @@ export function useStoryDraftState({
     draftWritesRef.current = write.catch(() => undefined)
     return write
   }, [])
+
+  /** 把现取的缩略图贴回对应待传项（按 assetId 匹配，已移除的项自然跳过）。 */
+  const applyLocalAssetPreviews = useCallback((previews: Map<string, string>) => {
+    if (previews.size === 0) return
+    setPendingImages((prev) => prev.map((image) => {
+      if (!image.assetId) return image
+      const previewUrl = previews.get(image.assetId)
+      return previewUrl && previewUrl !== image.previewUrl ? { ...image, previewUrl } : image
+    }))
+  }, [setPendingImages])
+
+  /**
+   * 草稿 → 待传项。本地资源库项的元数据随草稿落盘，故同步即可还原；
+   * 只有缩略图需要按 assetId 现取（URL 带会话与缓存键，跨重启必失效）。
+   */
+  const restorePendingImages = useCallback((files: StoryEditorDraftData['files'] | undefined): PendingImage[] => {
+    const { pending, localAssetIdsNeedingPreview } = pendingImagesFromDraftEntries(files ?? [])
+    if (localAssetIdsNeedingPreview.length > 0) {
+      void localAssetPreviewUrls(localAssetIdsNeedingPreview)
+        .then(applyLocalAssetPreviews)
+        .catch((error) => console.error('Failed to refresh local asset previews:', error))
+    }
+    return pending
+  }, [applyLocalAssetPreviews])
 
   const rekeySavedDraft = useCallback((oldDraftId: string, storyId: string) => {
     // Resolve queued autosaves to the cloud ID before moving the latest old row.
@@ -190,7 +210,8 @@ export function useStoryDraftState({
           coverCrop: currentStory.coverCrop ?? null,
           pendingCoverId,
           photoIds,
-          files: pendingImages.map((image) => ({ id: image.id, file: image.file, takenAt: image.takenAt, assetId: image.assetId })),
+          // 本地资源库项只落元数据（assetId/filePath/hash/exif），字节仍留在磁盘
+          files: draftEntriesFromPendingImages(pendingImages),
         })
       })
       setLastSavedAt(Date.now())
@@ -269,7 +290,7 @@ export function useStoryDraftState({
     setLastSavedAt(draft.savedAt)
     setInitialStory({ ...createSnapshot(restoredStory), photoIds: draft.photoIds })
     notify(t('admin.restored_from_draft'), 'info')
-  }, [allPhotos, beginEditorSession, notify, setCurrentStory, setPendingCoverId, setPendingImages, t])
+  }, [allPhotos, beginEditorSession, notify, restorePendingImages, setCurrentStory, setPendingCoverId, setPendingImages, t])
 
   const createStoryWithDraftCheck = useCallback(async () => {
     beginEditorSession()
@@ -423,7 +444,7 @@ export function useStoryDraftState({
       notify(t('admin.restored_from_draft'), 'info')
       onDraftConsumed?.()
     })
-  }, [allPhotos, beginEditorSession, editFromDraft, notify, onDraftConsumed, photosHydrated, setCurrentStory, setPendingCoverId, setPendingImages, setStoryEditMode, t])
+  }, [allPhotos, beginEditorSession, editFromDraft, notify, onDraftConsumed, photosHydrated, restorePendingImages, setCurrentStory, setPendingCoverId, setPendingImages, setStoryEditMode, t])
 
   return {
     editorSessionId,

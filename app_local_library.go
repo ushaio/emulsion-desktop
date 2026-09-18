@@ -62,8 +62,8 @@ func (a *App) SelectLocalLibraryImportFiles() ([]string, error) {
 		Title: "选择要移入资源库的文件",
 		Filters: []runtime.FileFilter{
 			{
-				DisplayName: "照片资源 (*.jpg;*.jpeg;*.png;*.webp;*.gif;*.avif;*.heic;*.heif;*.tif;*.tiff;*.cr2;*.cr3;*.nef;*.arw;*.dng;*.raf;*.rw2)",
-				Pattern:     "*.jpg;*.jpeg;*.png;*.webp;*.gif;*.avif;*.heic;*.heif;*.tif;*.tiff;*.cr2;*.cr3;*.nef;*.arw;*.dng;*.raf;*.rw2",
+				DisplayName: "照片资源 (*.jpg;*.jpeg;*.png;*.webp;*.gif;*.avif;*.heic;*.heif;*.tif;*.tiff;*.cr2;*.cr3;*.nef;*.arw;*.dng;*.raf;*.rw2;*.3fr)",
+				Pattern:     "*.jpg;*.jpeg;*.png;*.webp;*.gif;*.avif;*.heic;*.heif;*.tif;*.tiff;*.cr2;*.cr3;*.nef;*.arw;*.dng;*.raf;*.rw2;*.3fr",
 			},
 			{
 				DisplayName: "视频/音频 (*.mp4;*.mov;*.mp3;*.m4a;*.aac;*.wav;*.flac;*.ogg)",
@@ -299,6 +299,9 @@ func (a *App) CreateLocalLibraryBackup() (local_library.BackupInfo, error) {
 func (a *App) RestoreLocalLibraryBackup(id string) (local_library.LibrarySnapshot, error) {
 	return a.LocalLibrary.RestoreBackup(id)
 }
+func (a *App) DeleteLocalLibraryBackup(id string) error {
+	return a.LocalLibrary.DeleteBackup(id)
+}
 func (a *App) GetLocalLibraryPreferences() (local_library.LocalLibraryPreferences, error) {
 	return a.LocalLibrary.ImportPreferences()
 }
@@ -374,6 +377,11 @@ func (a *App) DeleteLocalAssetCloudAndLocal(id string, force bool) error {
 }
 func (a *App) RenameLocalAsset(id, fileName string) (local_library.AssetMoveResult, error) {
 	return a.LocalLibrary.RenameAsset(local_library.AssetID(id), fileName)
+}
+// ApplyLocalAssetImageEdit writes a crop/rotate/flip edit back to the library,
+// either replacing the original file or creating a numbered sibling copy.
+func (a *App) ApplyLocalAssetImageEdit(input local_library.ApplyImageEditInput) (local_library.ImageEditResult, error) {
+	return a.LocalLibrary.ApplyImageEdit(input)
 }
 func (a *App) MoveLocalAssets(ids []string, destinationFolder string) ([]local_library.AssetMoveResult, error) {
 	assetIDs := make([]local_library.AssetID, len(ids))

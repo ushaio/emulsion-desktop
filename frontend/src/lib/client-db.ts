@@ -8,7 +8,7 @@ export interface StoryDraftData extends ArticleContentDto {
   selectedAlbumIds: string[];
   savedAt: number;
   cloudSynced?: boolean;
-  files: { id: string; file: File }[];
+  files: DraftFileEntry[];
 }
 
 // ============ Story Editor Draft Types (for StoriesTab) ============
@@ -27,7 +27,7 @@ export interface StoryEditorDraftData extends ArticleContentDto {
   photoIds: string[];
   savedAt: number;
   cloudSynced?: boolean;
-  files: { id: string; file: File; takenAt?: string; assetId?: string }[];
+  files: DraftFileEntry[];
 }
 
 // ============ Blog Draft Types ============
@@ -70,7 +70,22 @@ interface StoredDraftFile {
   takenAt?: string;
   /** 来自本地资源库时的资源 ID，用于上传后建立本地资源库与云端照片的关联 */
   assetId?: string;
-  data: string;
+  /**
+   * 本地资源库项导入时解析出的磁盘绝对路径。
+   * 它**不是**上传时的读盘依据（UploadLocalAsset 按 assetId 现取），
+   * 而是上传队列里 hashes/exifs 两张表的键 —— 缺了会让多个待传项都落在空串上互相覆盖。
+   */
+  filePath?: string;
+  fileSize?: number;
+  hash?: string;
+  /** 导入时一并解析出的 EXIF，省去恢复后再读一遍原图。 */
+  exif?: Record<string, unknown>;
+  /**
+   * 本地文件来源的 base64 内容。
+   * 本地资源库项**没有**这个字段：它按 assetId 从磁盘读原图，无需把字节塞进草稿
+   * （几千张图的 base64 会把 SQLite 草稿撑爆，且原图本就在本地）。
+   */
+  data?: string;
 }
 
 function nativeDraftBridge(): NativeDraftBridge | null {
@@ -105,23 +120,59 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 function base64ToFile(file: StoredDraftFile): File {
-  const binary = atob(file.data);
+  const binary = atob(file.data ?? '');
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
   return new File([bytes], file.name, { type: file.type, lastModified: file.lastModified });
 }
 
+/**
+ * 草稿里一条待传源（写入与恢复共用同一形状）。
+ * 两类来源靠 `file`（本地文件，走 HTTP 直传）与 `assetId`（本地资源库，走 UploadLocalAsset）区分。
+ */
+export interface DraftFileEntry {
+  id: string;
+  /** 仅「本地文件」来源存在：字节随草稿以 base64 落盘，恢复时还原成 File。 */
+  file?: File;
+  /** 展示用文件名（本地文件来源等于 file.name）。 */
+  fileName?: string;
+  takenAt?: string;
+  assetId?: string;
+  filePath?: string;
+  fileSize?: number;
+  hash?: string;
+  exif?: Record<string, unknown>;
+}
+
 async function encodeDraft(data: Record<string, unknown>): Promise<Record<string, unknown>> {
   if (!Array.isArray(data.files)) return data;
-  const files = await Promise.all((data.files as Array<{ id: string; file: File; takenAt?: string; assetId?: string }>).map(async (entry) => ({
-    id: entry.id,
-    name: entry.file.name,
-    type: entry.file.type,
-    lastModified: entry.file.lastModified,
-    ...(entry.takenAt ? { takenAt: entry.takenAt } : {}),
-    ...(entry.assetId ? { assetId: entry.assetId } : {}),
-    data: await fileToBase64(entry.file),
-  })));
+  const files = await Promise.all((data.files as DraftFileEntry[]).map(async (entry) => {
+    // 本地资源库项没有 File：只存元数据（assetId + 导入时已解析出的路径/哈希/EXIF），
+    // 恢复时无需再读一遍原图；缩略图改按 assetId 现取（会话级 URL 跨重启必失效）。
+    if (!entry.file) {
+      return {
+        id: entry.id,
+        name: entry.fileName ?? '',
+        type: '',
+        lastModified: 0,
+        ...(entry.takenAt ? { takenAt: entry.takenAt } : {}),
+        ...(entry.assetId ? { assetId: entry.assetId } : {}),
+        ...(entry.filePath ? { filePath: entry.filePath } : {}),
+        ...(entry.fileSize ? { fileSize: entry.fileSize } : {}),
+        ...(entry.hash ? { hash: entry.hash } : {}),
+        ...(entry.exif ? { exif: entry.exif } : {}),
+      };
+    }
+    return {
+      id: entry.id,
+      name: entry.file.name,
+      type: entry.file.type,
+      lastModified: entry.file.lastModified,
+      ...(entry.takenAt ? { takenAt: entry.takenAt } : {}),
+      ...(entry.assetId ? { assetId: entry.assetId } : {}),
+      data: await fileToBase64(entry.file),
+    };
+  }));
   return { ...data, files };
 }
 
@@ -152,12 +203,26 @@ function decodeDraft<T>(value: T): T {
   if (!Array.isArray(draft.files)) return data;
   return {
     ...draft,
-    files: draft.files.map((entry) => ({
-      id: entry.id,
-      file: base64ToFile(entry),
-      ...(entry.takenAt ? { takenAt: entry.takenAt } : {}),
-      ...(entry.assetId ? { assetId: entry.assetId } : {}),
-    })),
+    files: draft.files.map((entry) => (entry.data
+      // 本地文件来源：base64 还原成 File
+      ? {
+          id: entry.id,
+          file: base64ToFile(entry),
+          ...(entry.name ? { fileName: entry.name } : {}),
+          ...(entry.takenAt ? { takenAt: entry.takenAt } : {}),
+          ...(entry.assetId ? { assetId: entry.assetId } : {}),
+        }
+      // 本地资源库来源：本就没有字节，保留元数据即可（上传由 Go 按 assetId 读盘）
+      : {
+          id: entry.id,
+          ...(entry.name ? { fileName: entry.name } : {}),
+          ...(entry.takenAt ? { takenAt: entry.takenAt } : {}),
+          ...(entry.assetId ? { assetId: entry.assetId } : {}),
+          ...(entry.filePath ? { filePath: entry.filePath } : {}),
+          ...(entry.fileSize ? { fileSize: entry.fileSize } : {}),
+          ...(entry.hash ? { hash: entry.hash } : {}),
+          ...(entry.exif ? { exif: entry.exif } : {}),
+        })),
   } as T;
 }
 
@@ -563,7 +628,7 @@ export async function saveStoryEditorDraftToDB(data: {
   coverCrop?: { x: number; y: number; width: number; height: number } | null;
   pendingCoverId?: string | null;
   photoIds: string[];
-  files: { id: string; file: File; takenAt?: string; assetId?: string }[];
+  files: DraftFileEntry[];
   /** 写入时直接记录的同步状态（默认 false；保存到云端后补齐本地记录时传 true） */
   cloudSynced?: boolean;
 }): Promise<void> {

@@ -20,7 +20,15 @@ import type { UploadProgressState } from './types'
 import { useStoryPasteUploads } from './useStoryPasteUploads'
 import { uploadStoryPhotoFile } from './uploadStoryPhotoFile'
 import { isMilkdownStoryReady } from './utils'
-import { GetAllPhotos, SetLocalAssetCloudLink } from '../../../../wailsjs/go/main/App'
+import { GetAllPhotos } from '../../../../wailsjs/go/main/App'
+import { useUploadQueue } from '@/contexts/UploadQueueContext'
+import {
+  isLocalLibraryPending,
+  pendingDisplayName,
+  queueLocalAssetUploads,
+  releasePendingPreview,
+  waitForTaskOutcome,
+} from '@/lib/editor-pending-import'
 
 interface UseStoryEditorActionsParams {
   token: string | null
@@ -32,6 +40,12 @@ interface UseStoryEditorActionsParams {
   initialUploadSettings: UploadSettings
   initialPasteUploadSettings: UploadSettings
   pendingPhotoIdsRef: MutableRefObject<string[] | null>
+  /**
+   * 编辑器句柄由调用方持有：doSaveStory 需要在保存时同步读取编辑器真实内容
+   * （上传替换占位发生在 handleConfirmUpload 内部，不会回溯改写已在执行中的闭包），
+   * 所以两处必须共用同一个 ref，不能在 hook 内部另建一个。
+   */
+  editorRef: MutableRefObject<NarrativeMilkdownEditorHandle | null>
   setCurrentStory: Dispatch<SetStateAction<StoryDto | null>>
   setAllPhotos: Dispatch<SetStateAction<PhotoDto[]>>
   setPendingImages: Dispatch<SetStateAction<PendingImage[]>>
@@ -41,7 +55,6 @@ interface UseStoryEditorActionsParams {
 }
 
 interface UseStoryEditorActionsResult {
-  editorRef: MutableRefObject<NarrativeMilkdownEditorHandle | null>
   showUploadSettings: boolean
   setShowUploadSettings: Dispatch<SetStateAction<boolean>>
   showPasteUploadSettings: boolean
@@ -60,6 +73,8 @@ interface UseStoryEditorActionsResult {
   handleConfirmPasteUpload: (settings: UploadSettings) => Promise<void>
   handleInsertPhotoMarkdown: (photo: PhotoDto) => void
   handleInsertGalleryMarkdown: (photoIds: string[]) => void
+  /** 把素材库里的待传项作为占位卡插入正文（上传成功后原位替换） */
+  handleInsertPendingPlaceholder: (pending: PendingImage) => void
   restoreUploadSettings: (settings: UploadSettings) => void
   restorePasteUploadSettings: (settings: UploadSettings) => void
 }
@@ -90,6 +105,7 @@ export function useStoryEditorActions({
   initialUploadSettings,
   initialPasteUploadSettings,
   pendingPhotoIdsRef,
+  editorRef,
   setCurrentStory,
   setAllPhotos,
   setPendingImages,
@@ -97,9 +113,10 @@ export function useStoryEditorActions({
   t,
   onRequestSave,
 }: UseStoryEditorActionsParams): UseStoryEditorActionsResult {
-  const editorRef = useRef<NarrativeMilkdownEditorHandle>(null)
   const editorReady = isMilkdownStoryReady(currentStory)
   const pendingPasteFilesRef = useRef<File[] | null>(null)
+  // 本地资源库来源的待传项经全局队列上传（UploadLocalAsset 自动写回云关联）
+  const { addTasks, getTasks } = useUploadQueue()
 
   const [showUploadSettings, setShowUploadSettings] = useState(false)
   const [showPasteUploadSettings, setShowPasteUploadSettings] = useState(false)
@@ -246,7 +263,8 @@ export function useStoryEditorActions({
   const handleRemovePendingImage = useCallback((id: string) => {
     setPendingImages((prev) => {
       const item = prev.find((image) => image.id === id)
-      if (item) URL.revokeObjectURL(item.previewUrl)
+      // 本地资源库来源用的是资源库 URL，不能 revoke
+      if (item) releasePendingPreview(item.previewUrl)
       return prev.filter((image) => image.id !== id)
     })
   }, [setPendingImages])
@@ -262,16 +280,60 @@ export function useStoryEditorActions({
 
     const uploadedPhotoIds: string[] = []
     const uploadedPhotos: PhotoDto[] = []
+    // 逐项累计成功数：去重命中时两项可能映射到同一 photoId，
+    // 用 uploadedPhotoIds.length 反推失败数会把成功误判成失败。
+    let successCount = 0
+    // 待传项 id → 上传所得 photoId：用于把正文里该待传项的占位卡换成真图。
+    // 待传项 id 就是插卡时的 uploadId（见 handleInsertPendingPlaceholder）。
+    const photoIdByPendingId = new Map<string, string>()
 
-    for (let index = 0; index < toUpload.length; index += 1) {
-      const pending = toUpload[index]
-      setUploadProgress({ current: index + 1, total: toUpload.length, currentFile: pending.file.name })
+    // ── 本地资源库来源：走原生链路 ────────────────────────────────
+    // UploadLocalAsset 在 Go 侧完成上传并自动写回云关联（app.go:844/860），
+    // 因此这里不需要 fetch(blob)，也不需要手动 SetLocalAssetCloudLink。
+    // 交给全局队列后并行处理，最后统一等待终态再收尾。
+    const localLibraryItems = toUpload.filter(isLocalLibraryPending)
+    const queuedTasks = queueLocalAssetUploads(localLibraryItems, settings, addTasks)
+    if (queuedTasks.length > 0) {
+      for (const item of localLibraryItems) {
+        setPendingImages((prev) => prev.map((image) => image.id === item.id ? { ...image, status: 'uploading' as const, progress: 0 } : image))
+      }
+      const outcome = await waitForTaskOutcome(queuedTasks, getTasks)
+      const taskById = new Map(getTasks().map((task) => [task.id, task]))
+      localLibraryItems.forEach((item, index) => {
+        const task = queuedTasks[index]
+        const state = task ? taskById.get(task.id) : undefined
+        const photoId = state?.photoId
+        if (state?.status === 'completed' && photoId) {
+          successCount += 1
+          if (!uploadedPhotoIds.includes(photoId)) uploadedPhotoIds.push(photoId)
+          photoIdByPendingId.set(item.id, photoId)
+          setPendingImages((prev) => prev.map((image) => image.id === item.id ? { ...image, status: 'success' as const, progress: 100, photoId } : image))
+        } else {
+          setPendingImages((prev) => prev.map((image) => image.id === item.id ? { ...image, status: 'failed' as const, error: state?.error || 'Upload failed' } : image))
+        }
+      })
+      // 队列结果带出 photoId，但 DTO 不在手边：批量解析一次供后续关联/插入使用
+      const photoDetails = outcome.photoIds.length > 0
+        ? await Promise.all(outcome.photoIds.map((id) => findExistingPhotoById(id).catch(() => null)))
+        : []
+      for (const photo of photoDetails) {
+        if (photo && !uploadedPhotos.some((item) => item.id === photo.id)) uploadedPhotos.push(photo)
+      }
+    }
+
+    // ── 本地文件来源：沿用 HTTP 直传 ──────────────────────────────
+    const localFileItems = toUpload.filter((image) => !isLocalLibraryPending(image))
+    for (let index = 0; index < localFileItems.length; index += 1) {
+      const pending = localFileItems[index]
+      const file = pending.file
+      if (!file) continue
+      setUploadProgress({ current: index + 1, total: localFileItems.length, currentFile: file.name })
       setPendingImages((prev) => prev.map((image) => image.id === pending.id ? { ...image, status: 'uploading' as const, progress: 0 } : image))
 
       try {
         const { photo, reusedDuplicate } = await uploadStoryPhotoFile({
           token,
-          file: pending.file,
+          file,
           settings,
           findExistingPhotoById,
           onProgress: (progress) => {
@@ -285,17 +347,11 @@ export function useStoryEditorActions({
         if (!uploadedPhotos.some((item) => item.id === photo.id)) {
           uploadedPhotos.push(photo)
         }
+        photoIdByPendingId.set(pending.id, photo.id)
+        successCount += 1
         setPendingImages((prev) => prev.map((image) => image.id === pending.id ? { ...image, status: 'success' as const, progress: 100, photoId: photo.id } : image))
-        if (pending.assetId) {
-          // 来自本地资源库的图片：上传成功后建立与云端照片的关联，
-          // 之后本地资源库的周期云同步会据此补全云端投影；失败不影响上传结果
-          try {
-            await SetLocalAssetCloudLink(pending.assetId, photo.id, '')
-          } catch (error) {
-            console.error('Failed to link local library asset to cloud photo:', error)
-            notify(t('admin.local_asset_cloud_link_failed'), 'info')
-          }
-        }
+        // 本地资源库来源不到这里：它由 isLocalLibraryPending 分流到原生链路，
+        // 云关联由 Go 侧 UploadLocalAsset 自动回写（app.go:844/860），无需前端再补。
         if (reusedDuplicate) {
           addPhotoToCache(photo)
           notify(`图片已存在，已复用：${photo.title}`, 'info')
@@ -315,6 +371,40 @@ export function useStoryEditorActions({
       try {
         await addPhotosToAlbum(token, settings.albumId, uploadedPhotoIds)
       } catch {}
+    }
+
+    // ── 正文占位卡 → 真实图片 ────────────────────────────────────
+    // 素材库的待传项插入正文时留下 kind='upload' 的占位卡（uploadId = 待传项 id）。
+    // 这里按 uploadId 原位替换；失败项标记为 failed 卡，让用户看得见并手动移除。
+    // 必须放在本函数**内部**：调用方（StoriesTab.doSaveStory）随后会同步读取编辑器内容，
+    // 若把替换留到返回之后，保存到的仍是占位正文。
+    // 上传成功但 DTO 解析失败（uploadedPhotos 里没有）时记下来，不让静默留下 pending 卡。
+    const unresolvedPlaceholderNames: string[] = []
+    if (editorRef.current) {
+      for (const item of toUpload) {
+        const photoId = photoIdByPendingId.get(item.id)
+        const photo = photoId ? uploadedPhotos.find((entry) => entry.id === photoId) : undefined
+        if (photo) {
+          // 同一待传项可能插了多张卡，updateUpload 会把该 uploadId 的**全部**卡片一起替换
+          editorRef.current.resolveImageUploadPlaceholder(item.id, {
+            src: resolveAssetUrl(photo.url, cdnDomain),
+            alt: photo.title,
+            photoId: photo.id,
+          })
+        } else {
+          // 上传失败的（含未走到上传的项）→ 失败卡；上传成功但取不到 DTO 的 → 也标记，
+          // 否则会留下一张永远不动的「待上传」卡，把保存永久拦住。
+          editorRef.current.failImageUploadPlaceholder(item.id)
+          if (photoId) unresolvedPlaceholderNames.push(pendingDisplayName(item))
+        }
+      }
+      syncEditorContent()
+    }
+    if (unresolvedPlaceholderNames.length > 0) {
+      notify(
+        `${unresolvedPlaceholderNames.length} 张图片已上传但正文占位未能替换，请手动移除对应卡片：${unresolvedPlaceholderNames.slice(0, 3).join('、')}`,
+        'error',
+      )
     }
 
     if (uploadedPhotos.length > 0) {
@@ -344,12 +434,13 @@ export function useStoryEditorActions({
     }
 
     setPendingImages((prev) => {
-      prev.filter((image) => image.status === 'success').forEach((image) => URL.revokeObjectURL(image.previewUrl))
+      prev.filter((image) => image.status === 'success').forEach((image) => releasePendingPreview(image.previewUrl))
       return prev.filter((image) => image.status !== 'success')
     })
     setIsUploading(false)
 
-    const failedCount = pendingImages.filter((image) => image.status === 'failed').length
+    // 用本批逐项累计的成功数计失败：闭包里的 pendingImages 是上传前快照，读不到本轮状态迁移
+    const failedCount = toUpload.length - successCount
     if (failedCount === 0) {
       // Pass uploaded photo IDs via ref so doSaveStory can merge them
       // (setCurrentStory hasn't re-rendered yet, so the closure state is stale)
@@ -359,7 +450,7 @@ export function useStoryEditorActions({
     }
 
     notify(`${failedCount} ${t('admin.upload_failed_count')}`, 'error')
-  }, [addPhotoToCache, currentStory, editorReady, findExistingPhotoById, notify, onRequestSave, pendingImages, persistUploadSettings, setCurrentStory, setPendingImages, stories, t, token])
+  }, [addPhotoToCache, addTasks, cdnDomain, currentStory, editorReady, findExistingPhotoById, getTasks, notify, onRequestSave, pendingImages, persistUploadSettings, setCurrentStory, setPendingImages, stories, syncEditorContent, t, token])
 
   const handleRetryFailedUploads = useCallback(() => {
     if (!editorReady) return
@@ -391,6 +482,25 @@ export function useStoryEditorActions({
 
     await uploadAndInsertFiles(files, settings)
   }, [editorReady, persistPasteUploadSettings, uploadAndInsertFiles])
+
+  /**
+   * 待传项 → 正文占位卡。
+   *
+   * uploadId 直接用待传项的 `id`：草稿落盘时会保存待传项 id，重启恢复后 id 不变，
+   * 因此「占位 ↔ 待传项」的对应关系能跨重启存活，上传成功时还能原位替换。
+   * 状态取 'pending'（与粘贴链路的 'uploading' 区分）：此刻上传根本还没开始，
+   * 显示成「正在上传」会误导。同一待传项允许插多次（同 uploadId 多张卡，一起被替换）。
+   */
+  const handleInsertPendingPlaceholder = useCallback((pending: PendingImage) => {
+    if (!editorReady || !editorRef.current) return
+    editorRef.current.insertImageUploadPlaceholder({
+      uploadId: pending.id,
+      fileName: pendingDisplayName(pending),
+      status: 'pending',
+    })
+    syncEditorContent()
+    notify(t('admin.notify_placeholder_inserted'), 'success')
+  }, [editorReady, notify, syncEditorContent, t])
 
   const handleInsertPhotoMarkdown = useCallback((photo: PhotoDto) => {
     if (!editorReady || !editorRef.current) return
@@ -433,7 +543,6 @@ export function useStoryEditorActions({
   }, [currentStory?.photos, editorReady, insertDirective, notify])
 
   return {
-    editorRef,
     showUploadSettings,
     setShowUploadSettings,
     showPasteUploadSettings,
@@ -452,6 +561,7 @@ export function useStoryEditorActions({
     handleConfirmPasteUpload,
     handleInsertPhotoMarkdown,
     handleInsertGalleryMarkdown,
+    handleInsertPendingPlaceholder,
     restoreUploadSettings,
     restorePasteUploadSettings,
   }

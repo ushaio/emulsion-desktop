@@ -38,6 +38,12 @@ const adminButtonVariants = cva(
           'p-1.5 rounded bg-black/60 text-white hover:text-amber-400',
         iconOnDarkDanger:
           'p-1.5 rounded bg-black/60 text-white hover:text-destructive',
+        // 紧凑档：给一行 3 张以上、瓦片宽约 100px 的网格用。常规档三枚并排要 86px，
+        // 在那种瓦片里必然溢出（父级 overflow-hidden 会直接裁掉），这才有存在必要。
+        iconOnDarkCompact:
+          'p-1 rounded bg-black/60 text-white hover:text-amber-400',
+        iconOnDarkCompactDanger:
+          'p-1 rounded bg-black/60 text-white hover:text-destructive',
         iconAccent: 'p-1.5 rounded bg-amber-500 text-white hover:bg-amber-600',
         switch:
           'relative inline-flex h-5 w-10 items-center rounded-full transition-colors data-[state=on]:bg-primary data-[state=off]:bg-muted',

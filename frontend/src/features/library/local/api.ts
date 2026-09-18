@@ -1,6 +1,7 @@
 import {
   BatchUpdateLocalAssetOrganization,
   BatchUpdateLocalAssetOrganizationByQuery,
+  ApplyLocalAssetImageEdit,
   CancelLocalLibraryScan,
   CloseLocalLibrary,
   CreateLocalLibraryBackup,
@@ -9,6 +10,7 @@ import {
   CopyLocalAssetsToClipboard,
   DeleteLocalAssetCloud,
   DeleteLocalAssetCloudAndLocal,
+  DeleteLocalLibraryBackup,
   CreateLocalLibrary,
   CreateLocalLibraryFolder,
   DeleteLocalLibraryFolder,
@@ -80,6 +82,7 @@ import {
   ReportLocalAssetMediaMetadata,
   UpdateLocalAssetClip,
 } from '../../../../wailsjs/go/main/App'
+import { local_library as wailsLocalLibrary } from '../../../../wailsjs/go/models'
 import type {
   AssetMaintenanceResult,
   AssetMoveResult,
@@ -102,6 +105,8 @@ import type {
   ImportResult,
   LibrarySnapshot,
   LibraryUpgradeInfo,
+  LocalImageEditInput,
+  LocalImageEditResult,
   LocalLibraryError,
   LocalLibraryImportMode,
   LocalLibraryPreferences,
@@ -156,11 +161,18 @@ function normalizeSnapshot(source: SnapshotSource): LibrarySnapshot {
 }
 
 function normalizeBackup(source: BackupSource): BackupInfo {
+  const schemaVersion = Number(source?.schemaVersion ?? 0)
+  const assetCount = Number(source?.assetCount ?? 0)
+  const note = source?.note ? String(source.note) : ''
   return {
     id: String(source?.id ?? ''),
     kind: String(source?.kind ?? ''),
     createdAt: asIsoTime(source?.createdAt) || new Date(0).toISOString(),
     sizeBytes: Number(source?.sizeBytes ?? 0),
+    appVersion: source?.appVersion ? String(source.appVersion) : undefined,
+    schemaVersion: schemaVersion > 0 ? schemaVersion : undefined,
+    assetCount: assetCount > 0 ? assetCount : undefined,
+    note: note || undefined,
   }
 }
 
@@ -247,6 +259,7 @@ export const localLibraryApi = {
     }
   },
   createBackup: async () => normalizeBackup(await CreateLocalLibraryBackup()),
+  deleteBackup: async (id: string) => { await DeleteLocalLibraryBackup(id) },
   restoreBackup: async (id: string) => normalizeSnapshot(await RestoreLocalLibraryBackup(id)),
   selectFolder: (title: string) => SelectLocalLibraryFolder(title),
   selectImportFiles: () => SelectLocalLibraryImportFiles(),
@@ -468,6 +481,25 @@ export const localLibraryApi = {
   importFiles: (paths: string[], destination: string) => ImportLocalLibraryFiles(paths, destination) as Promise<ImportResult[]>,
   updateAsset: (id: string, title: string, notes: string, rating: number, color: string, favorite: boolean) =>
     UpdateLocalAsset(id, title, notes, rating, color, favorite),
+  /**
+   * Writes a crop/rotate/flip edit back to the library: either replacing the
+   * original file or creating a numbered sibling copy in the same folder.
+   * angleDeg is a free rotation on top of the quarter turns.
+   */
+  async editImage(input: LocalImageEditInput): Promise<LocalImageEditResult> {
+    // The generated model nests ImageCropRect, so it carries a convertValues
+    // helper of its own and has to be built through createFrom rather than
+    // handed a plain object literal.
+    return await ApplyLocalAssetImageEdit(wailsLocalLibrary.ApplyImageEditInput.createFrom({
+      assetId: input.assetId,
+      mode: input.mode,
+      rotation: input.rotation,
+      angleDeg: input.angleDeg,
+      flipH: input.flipH,
+      flipV: input.flipV,
+      crop: input.crop ? wailsLocalLibrary.ImageCropRect.createFrom(input.crop) : undefined,
+    }))
+  },
   renameAsset: (id: string, fileName: string) => RenameLocalAsset(id, fileName) as Promise<AssetMoveResult>,
   async moveAssets(ids: string[], destinationFolder: string): Promise<AssetMoveResult[]> {
     const plan = await PlanLocalAssetMove(ids, destinationFolder, 'skip')

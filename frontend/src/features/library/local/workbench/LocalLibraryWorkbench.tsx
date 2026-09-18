@@ -34,6 +34,7 @@ import { LocalAssetGrid } from './LocalAssetGrid'
 import { LocalAssetSelectionToolbar } from './LocalAssetSelectionToolbar'
 import { DeleteAssetsDialog } from '../dialogs/DeleteAssetsDialog'
 import { LocalLibraryPreview } from './LocalLibraryPreview'
+import { LocalImageEditor } from './LocalImageEditor'
 import { LocalLibraryBackupDialog } from '../dialogs/LocalLibraryBackupDialog'
 import { LocalLibraryGuide, LOCAL_LIBRARY_GUIDE_SEEN_KEY } from '../entry/LocalLibraryGuide'
 import { MoveFolderDialog } from '../dialogs/MoveFolderDialog'
@@ -53,7 +54,7 @@ import { loadLocalLibraryUploadSettings, normalizeLocalLibraryUploadSettings, sa
 import { RestoreFolderDialog } from '../dialogs/RestoreFolderDialog'
 import { useLocalLibraryStore } from '../store'
 import { isPhotoAsset } from '../types'
-import type { AssetFileOperationPlan, AssetPage, BackupOverview, BatchAssetOrganizationUpdate, FolderDeletionPreview, FolderFileOperationPlan, FolderItem, FolderProperties, FolderTrashEntry, LibrarySnapshot, LocalAsset, LocalAssetClip, LocalLibraryEvent, LocalLibraryImportMode, LocalTag, LocalCollection, CollectionGroup } from '../types'
+import type { AssetFileOperationPlan, AssetPage, BackupOverview, BatchAssetOrganizationUpdate, FolderDeletionPreview, FolderFileOperationPlan, FolderItem, FolderProperties, FolderTrashEntry, LibrarySnapshot, LocalAsset, LocalAssetClip, LocalImageEditResult, LocalLibraryEvent, LocalLibraryImportMode, LocalTag, LocalCollection, CollectionGroup } from '../types'
 import { DEFAULT_IMPORT_MODE, effectiveImportMode, shouldAskImportMode } from '../types'
 import type { LocalLibraryCopy } from '../copy'
 
@@ -123,6 +124,8 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
   const [clipsOnly, setClipsOnly] = useState(false)
   // 从片段入口打开播放器时，限定播放该片段的起止范围。
   const [previewClip, setPreviewClip] = useState<LocalAssetClip | null>(null)
+  // 正在编辑的照片；非空时编辑器盖在查看器之上。
+  const [editAsset, setEditAsset] = useState<LocalAsset | null>(null)
   // 视图模式与缩放级别与云端共用同一份持久化偏好（usePreferences），保证交互一致。
   // 视图模式是点击切换，直接读写 store；缩放滑杆拖动频率高，
   // 先本地 state 即时响应，停止 200ms 后再写回偏好，避免每次拖动同步写 localStorage 卡顿。
@@ -141,7 +144,8 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
   }, [persistedGridSize])
   const [directFolderOnly, setDirectFolderOnly] = useState(false)
   const [livePhotoOnly, setLivePhotoOnly] = useState(false)
-  const photosOnly = filters.photosOnly !== false
+  // 「仅显示照片」是可选筛选项，默认不勾选：默认勾选会让「所有资源」实际只列出照片。
+  const photosOnly = filters.photosOnly === true
   const [importBusy, setImportBusy] = useState(false)
   const importBusyRef = useRef(false)
   const [pendingImportPaths, setPendingImportPaths] = useState<string[] | null>(null)
@@ -155,7 +159,7 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
   const [backupDialogOpen, setBackupDialogOpen] = useState(false)
   const [backupOverview, setBackupOverview] = useState<BackupOverview>()
   const [backupLoading, setBackupLoading] = useState(false)
-  const [backupOperation, setBackupOperation] = useState<'create' | 'restore' | null>(null)
+  const [backupOperation, setBackupOperation] = useState<'create' | 'restore' | 'delete' | null>(null)
   const [createFolderParent, setCreateFolderParent] = useState<FolderTarget | null>(null)
   const [organizeFolderTarget, setOrganizeFolderTarget] = useState<{ target: FolderTarget, mode: 'rename' | 'move', initialDestinationParent?: string } | null>(null)
   const [folderMovePlan, setFolderMovePlan] = useState<FolderFileOperationPlan>()
@@ -763,8 +767,11 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
       await localLibraryApi.createBackup()
       toast.success(copy.backupCreated)
       await loadBackups()
-    } catch (error) { toast.error(parseLocalLibraryError(error).message) }
-    finally { setBackupOperation(null) }
+      return true
+    } catch (error) {
+      toast.error(parseLocalLibraryError(error).message)
+      return false
+    } finally { setBackupOperation(null) }
   }
 
   const restoreBackup = async (id: string) => {
@@ -776,6 +783,19 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
       await Promise.all([reloadFolders(), reloadOrganization(), loadBackups()])
       refreshAssets()
       toast.success(copy.backupRestored)
+      return true
+    } catch (error) {
+      toast.error(parseLocalLibraryError(error).message)
+      return false
+    } finally { setBackupOperation(null) }
+  }
+
+  const deleteBackup = async (id: string) => {
+    setBackupOperation('delete')
+    try {
+      await localLibraryApi.deleteBackup(id)
+      toast.success(copy.backupDeleted)
+      await loadBackups()
       return true
     } catch (error) {
       toast.error(parseLocalLibraryError(error).message)
@@ -1372,12 +1392,23 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
     }) || null
   )
 
+  // 大图预览中删除当前图后：优先前进到下一张，没有则退到上一张，都没有才关闭预览。
+  // 邻居取的是删除前列表里的项（被删的是当前图，邻居必然仍存在）。
+  const advancePreviewAfterDelete = (deletedId: string) => {
+    if (previewAsset?.id !== deletedId) return
+    setPreviewClip(null)
+    const next = previewNeighbors.next ?? previewNeighbors.previous
+    if (next) setPreviewAsset(next)
+    else setPreviewAsset(null)
+  }
+
   const trashSelected = async () => {
     if (!deleteAsset) return
     setDeleteBusy(true)
     try {
       const results = await localLibraryApi.trashAssets([deleteAsset.id])
       runResultsMessage(results, copy.trashOption, copy.importPartial)
+      advancePreviewAfterDelete(deleteAsset.id)
       setDeleteAsset(null); selectAsset(null); refreshAssets(); refreshSnapshot()
     } catch (error) { toast.error(parseLocalLibraryError(error).message) }
     finally { setDeleteBusy(false) }
@@ -1416,6 +1447,7 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
     try {
       const results = await localLibraryApi.permanentlyDeleteAssets([deleteAsset.id])
       runResultsMessage(results, copy.confirmPermanent, copy.importPartial)
+      advancePreviewAfterDelete(deleteAsset.id)
       setDeleteAsset(null); selectAsset(null); refreshAssets(); refreshSnapshot()
     } catch (error) { toast.error(parseLocalLibraryError(error).message) }
     finally { setDeleteBusy(false) }
@@ -1438,6 +1470,7 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
     try {
       await localLibraryApi.deleteAssetCloudAndLocal(deleteAsset.id)
       toast.success(copy.cloudAndLocalDeleted)
+      advancePreviewAfterDelete(deleteAsset.id)
       setDeleteAsset(null); selectAsset(null); refreshAssets(); refreshSnapshot()
     } catch (error) { toast.error(parseLocalLibraryError(error).message || copy.cloudDeleteFailed) }
     finally { setDeleteBusy(false) }
@@ -1505,6 +1538,35 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
   const applyReanalyzedColors = useCallback(() => {
     refreshAssets()
   }, [refreshAssets])
+
+  // 保存编辑后刷新数据。覆盖会保留同一个资产 ID，所以直接把新身份补进正在预览
+  // 的资产：originalUrl 里的 v 参数一变，WebView 就会重新读取文件而不是复用旧位图。
+  const finishImageEdit = useCallback((result: LocalImageEditResult) => {
+    const current = useLocalLibraryStore.getState()
+    const patch = (asset: LocalAsset): LocalAsset => asset.id === result.assetId
+      ? {
+        ...asset,
+        relativePath: result.relativePath,
+        fileName: result.fileName,
+        byteSize: result.byteSize,
+        modifiedAtNs: result.modifiedAtNs,
+        width: result.width,
+        height: result.height,
+        // 编辑已把 EXIF 定向烘焙进像素，后端记录的方向因此固定为 1。
+        orientation: 1,
+        previewStatus: result.previewStatus,
+        thumbnailUrl: result.thumbnailUrl,
+        previewUrl: result.previewUrl,
+        originalUrl: result.originalUrl,
+      }
+      : asset
+    if (current.previewAsset?.id === result.assetId) current.setPreviewAsset(patch(current.previewAsset))
+    if (current.selectedAsset?.id === result.assetId) current.selectAsset(patch(current.selectedAsset))
+    setEditAsset(null)
+    toast.success(result.created ? copy.editCopied.replace('{name}', result.fileName) : copy.editSaved)
+    refreshAssets()
+    void refreshSnapshot()
+  }, [copy.editCopied, copy.editSaved, refreshAssets, refreshSnapshot])
 
   const runThumbnailRepair = useCallback(async (mode: 'missing' | 'all') => {
     setRepairBusy(true)
@@ -1820,7 +1882,7 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
         <main data-local-library-import-folder={canImportIntoCurrentView ? folder : undefined} style={canImportIntoCurrentView ? { '--wails-drop-target': 'drop' } as CSSProperties : undefined} className="relative col-start-2 row-start-2 flex min-h-0 min-w-0 flex-col overflow-hidden bg-[color-mix(in_srgb,var(--background)_94%,var(--secondary))]">
           <LibraryToolbar data-local-library-guide="toolbar">
             <LibrarySearchInput value={search} onChange={setSearch} placeholder={copy.search} />
-            <LocalAssetFilters copy={copy} filters={filters} onChange={setFilters} onClear={clearFilters} />
+            <LocalAssetFilters copy={copy} filters={filters} assets={page.items} onChange={setFilters} onClear={clearFilters} />
             {page.total > page.items.length && <button type="button" onClick={() => void selectAllQueryResults()} className="h-8 shrink-0 rounded-md border px-2.5 text-[10px] hover:bg-secondary">{copy.selectAllResults} {page.total.toLocaleString()}</button>}
             <label className="flex h-8 shrink-0 cursor-pointer items-center gap-2 rounded-md border bg-input px-2.5 text-[10px]">
               <input type="checkbox" checked={directFolderOnly} onChange={(event) => setDirectFolderOnly(event.target.checked)} />
@@ -1934,9 +1996,12 @@ export function LocalLibraryWorkbench({ copy, snapshot, onSnapshot, onClose, sel
       {dropTargetFolder !== null && <div className="pointer-events-none absolute inset-3 z-50 flex items-center justify-center rounded-xl border-2 border-dashed bg-background/90 backdrop-blur" style={{ borderColor: 'var(--primary)' }}><div className="text-center"><Upload size={30} className="mx-auto mb-3" style={{ color: 'var(--primary)' }} /><p className="text-sm font-medium">{copy.drop}</p><p className="mt-1 text-xs" style={{ color: 'var(--muted-foreground)' }}>{dropTargetFolder || copy.root}</p></div></div>}
       {previewAsset && <LocalLibraryPreview asset={previewAsset} copy={copy} onClose={() => { setPreviewAsset(null); setPreviewClip(null) }} onOpenSystem={openSystem}
         hasPrevious={Boolean(previewNeighbors.previous)} hasNext={Boolean(previewNeighbors.next)}
+        onEdit={setEditAsset} keysEnabled={!editAsset && !deleteAsset}
+        onDelete={(asset) => { selectAsset(asset); setDeleteAsset(asset) }}
         initialClip={previewClip ? { startMs: previewClip.startMs, endMs: previewClip.endMs, title: previewClip.title } : null}
         onPrevious={() => { setPreviewClip(null); if (previewNeighbors.previous) setPreviewAsset(previewNeighbors.previous) }} onNext={() => { setPreviewClip(null); void previewNext() }} />}
-      {backupDialogOpen && <LocalLibraryBackupDialog copy={copy} overview={backupOverview} loading={backupLoading} operation={backupOperation} onClose={() => setBackupDialogOpen(false)} onCreate={createBackup} onRestore={restoreBackup} />}
+      {editAsset && <LocalImageEditor key={editAsset.id} asset={editAsset} copy={copy} onClose={() => setEditAsset(null)} onSaved={finishImageEdit} />}
+      {backupDialogOpen && <LocalLibraryBackupDialog copy={copy} overview={backupOverview} loading={backupLoading} operation={backupOperation} onClose={() => setBackupDialogOpen(false)} onCreate={createBackup} onRestore={restoreBackup} onDelete={deleteBackup} />}
       {organizationEditor && <OrganizationEditorDialog target={organizationEditor} groups={collectionGroups} copy={copy} busy={organizationBusy} onClose={() => setOrganizationEditor(null)} onSubmit={(value) => void saveOrganization(value)} />}
       {organizationDelete && <DeleteOrganizationDialog copy={copy} busy={organizationBusy} title={organizationDelete.kind === 'tag' ? copy.deleteTagTitle : organizationDelete.kind === 'collection' ? copy.deleteCollectionTitle : copy.deleteCollectionGroupTitle} body={organizationDelete.kind === 'tag' ? copy.deleteTagBody : organizationDelete.kind === 'collection' ? copy.deleteCollectionBody : organizationDelete.nonEmpty ? copy.deleteCollectionGroupBody : copy.deleteEmptyCollectionGroupBody} dangerousLabel={organizationDelete.kind === 'group' && organizationDelete.nonEmpty ? copy.deleteGroupContents : copy.confirmPermanent} onClose={() => setOrganizationDelete(null)} onConfirm={() => void deleteOrganization(Boolean(organizationDelete.nonEmpty))} />}
       {pendingCollectionDrop && <AddToCollectionConfirmDialog assetCount={pendingCollectionDrop.assetIds.length} collectionName={collections.find((item) => item.id === pendingCollectionDrop.collectionId)?.name ?? ''} copy={copy} busy={organizationBusy} onConfirm={() => void confirmCollectionDrop()} onClose={() => { if (!organizationBusy) setPendingCollectionDrop(null) }} />}

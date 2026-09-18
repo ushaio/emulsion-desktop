@@ -23,7 +23,11 @@ const (
 	VendorAWSS3        = "aws-s3"
 	VendorMinIO        = "minio"
 	VendorGitHub       = "github"
-	VendorLocal        = "local"
+	VendorWebDAV       = "webdav"
+	// VendorLocal labels a server-side local-disk source. No Desktop plugin
+	// ships under this id; it exists so both ends can name the web `local`
+	// storage type with the same string.
+	VendorLocal = "local"
 )
 
 // vendorConfigKey lets a source override the inferred value. It is needed for
@@ -58,24 +62,29 @@ var endpointHostSignatures = []struct {
 
 // InferVendor resolves the concrete storage product for a source. The explicit
 // config override wins; otherwise the endpoint host is fingerprinted; finally
-// the plugin family decides for non-S3 plugins.
+// the plugin id decides.
 //
-// It never returns an empty string for a known plugin: callers display the
-// result directly, and an empty label would read as a bug. Unknown S3-compatible
-// endpoints fall back to MinIO because a self-hosted S3 gateway is by far the
-// most common reason an endpoint is unrecognizable.
+// An unrecognized plugin is labelled by its own id rather than folded into a
+// default: the only shipped plugins are github, s3-compatible and webdav, so a
+// catch-all "local" silently mislabelled WebDAV sources. Returning the raw id
+// keeps an unknown future plugin honest, and the UI renders the value as-is.
 func InferVendor(pluginID string, config map[string]string) string {
 	if override := strings.TrimSpace(config[vendorConfigKey]); override != "" {
 		return normalizeVendor(override)
 	}
 
-	switch strings.TrimSpace(pluginID) {
+	trimmed := strings.TrimSpace(pluginID)
+	switch trimmed {
 	case PluginGitHub:
 		return VendorGitHub
+	case PluginWebDAV:
+		return VendorWebDAV
 	case PluginS3Compatible:
 		return inferS3Vendor(config)
-	default:
+	case "":
 		return VendorLocal
+	default:
+		return normalizeVendor(trimmed)
 	}
 }
 

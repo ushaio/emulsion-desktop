@@ -109,24 +109,30 @@ export function LibraryCardCheckbox({
   )
 }
 
-/** 右上角状态角标：深色半透明胶囊；warn 为白底深色。color 可覆盖文字色。 */
+/** 右上角状态角标：深色半透明胶囊；warn 为白底深色。color 可覆盖文字色，background 可覆盖底色。 */
 export function LibraryCardBadge({
   children,
   title,
   warn = false,
   color,
+  background,
 }: {
   children: ReactNode
   title?: string
   warn?: boolean
   color?: string
+  /**
+   * 覆盖胶囊底色（默认深色半透明、warn 为白底）。
+   * 传浅色底时通常要一并传 color，否则保留默认的白色文字会读不清。
+   */
+  background?: string
 }) {
   return (
     <span
       title={title}
       className="inline-flex h-5 min-w-5 items-center justify-center gap-[3px] rounded-[5px] px-[5px] text-[10px] font-semibold leading-none backdrop-blur-sm"
       style={{
-        backgroundColor: warn ? 'rgba(255,255,255,0.92)' : 'rgba(9,9,11,0.62)',
+        backgroundColor: background ?? (warn ? 'rgba(255,255,255,0.92)' : 'rgba(9,9,11,0.62)'),
         color: color ?? (warn ? '#18181b' : '#ffffff'),
       }}
     >

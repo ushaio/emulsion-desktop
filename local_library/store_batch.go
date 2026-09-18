@@ -24,6 +24,7 @@ type assetIndexRow struct {
 	ModifiedAtNS    int64
 	PreviewStatus   string
 	MediaKind       string
+	Width           int
 	HasColors       bool
 	LivePhotoProbed bool
 }
@@ -73,7 +74,7 @@ func chunkedAssetIDs(ids []AssetID, size int) func(func([]AssetID) bool) {
 // read replaces the per-file SELECT the scanner used to issue for every file on
 // disk.
 func (s *store) indexSnapshot(ctx context.Context) (map[string]assetIndexRow, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT a.path_key,a.id,a.availability,a.byte_size,a.modified_at_ns,a.preview_status,a.media_kind,a.dominant_colors,COALESCE(lp.video_length,0)
+	rows, err := s.db.QueryContext(ctx, `SELECT a.path_key,a.id,a.availability,a.byte_size,a.modified_at_ns,a.preview_status,a.media_kind,a.width,a.dominant_colors,COALESCE(lp.video_length,0)
 		FROM assets a LEFT JOIN asset_live_photos lp ON lp.asset_id=a.id`)
 	if err != nil {
 		return nil, err
@@ -84,7 +85,7 @@ func (s *store) indexSnapshot(ctx context.Context) (map[string]assetIndexRow, er
 		var pathKey, dominantColors string
 		var row assetIndexRow
 		var videoLength int64
-		if err := rows.Scan(&pathKey, &row.ID, &row.Availability, &row.ByteSize, &row.ModifiedAtNS, &row.PreviewStatus, &row.MediaKind, &dominantColors, &videoLength); err != nil {
+		if err := rows.Scan(&pathKey, &row.ID, &row.Availability, &row.ByteSize, &row.ModifiedAtNS, &row.PreviewStatus, &row.MediaKind, &row.Width, &dominantColors, &videoLength); err != nil {
 			return nil, err
 		}
 		row.HasColors = dominantColors != "" && dominantColors != "[]"
